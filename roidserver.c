@@ -17,6 +17,10 @@ char* strerror(int errnum);
 
 #endif
 
+#define ROIDSERVER_NUM_PING_PACKETS 8
+#define ROIDSERVER_MAX_CLIENTS 16
+#define ROIDSERVER_READY_STATE (ROIDSERVER_NUM_PING_PACKETS+1)
+
 #define _EAGAIN      35
 #define _EINPROGRESS 36
 #define _EALREADY    37
@@ -39,20 +43,21 @@ char* strerror(int errnum);
 typedef struct {
   int socketFD;
   uint32_t id;
+  uint32_t state;
   char buffer[255];
   int bufferIndex;
 } client_connection_t;
 
+
 typedef struct {
   int serverFD;
-  client_connection_t clients[2];
+  client_connection_t clients[ROIDSERVER_MAX_CLIENTS];
 } global_t;
 
 global_t global;
 
 //static
 const int ONE = 1;
-
 
 static void
 network_assertValidClient(int index)
@@ -132,7 +137,8 @@ network_removeConnection(int index)
 {
   network_assertValidClient(index);
   uint32_t id = global.clients[index].id;
-  for (int i = 0; i < (int)countof(global.clients); i++) {
+  unsigned int i;
+  for (i = 0; i < countof(global.clients); i++) {
     if (id == global.clients[i].id) {
       debug_printInt("network_processClientData: removing connection slot: ", i);
       network_closeSocket(global.clients[i].socketFD);
@@ -188,20 +194,95 @@ network_accept(int serverFD)
 }
 
 
+static int
+network_setId(unsigned int index, uint32_t id)
+{
+  network_assertValidClient(index);
+  unsigned int i;
+  int count = 0;
+  for (i = 0; i < countof(global.clients); i++) {
+    if (global.clients[i].id == id) {
+      count++;
+    }
+  }
+
+  if (count < 2) {
+    global.clients[index].id = id;
+    printf("setting id of %d to %x\n", index, id);
+  }
+
+  return count < 2;
+}
+
+
+static uint32_t
+network_getPacket(int index)
+{
+  network_assertValidClient(index);
+  uint32_t packet = htonl(*(uint32_t*)global.clients[index].buffer);
+  unsigned int d = 0;
+  unsigned int s = 4;
+  while (s < global.clients[index].bufferIndex) {
+    global.clients[index].buffer[d++] = global.clients[index].buffer[s++];
+  } 
+  global.clients[index].bufferIndex -= 4;
+  return packet;
+}
+
+
+static void
+network_processId(int index)
+{
+  network_assertValidClient(index);
+  uint32_t packet = network_getPacket(index);
+  printf("network_processId: %d: %x\n", index, packet);
+  global.clients[index].state++;
+  if (!network_setId(index, packet)) {
+    network_removeConnection(index);
+  }
+}
+
+
+static void
+network_processPing(int index)
+{
+  network_assertValidClient(index);
+  uint32_t packet = network_getPacket(index);
+  printf("network_processPing: %d %x\n", index, packet);
+  if (packet == 0xdeadbeef) {
+    global.clients[index].state++;
+    if (send(global.clients[index].socketFD, &packet, sizeof(packet), MSG_DONTWAIT) != sizeof(packet)) {
+      network_removeConnection(index);    
+    }
+
+  } else {
+    network_removeConnection(index);
+  }
+}
+
+
 static void
 network_sendClientData(void)
 {
-  for (size_t i = 0; i < countof(global.clients); i++) {
-    if (global.clients[i].id != 0 && global.clients[i].bufferIndex > 0) {
-      for (size_t d = 0; d < countof(global.clients); d++) {
-	if (global.clients[i].id == global.clients[d].id && i != d) {
-	  if (send(global.clients[d].socketFD, global.clients[i].buffer, global.clients[i].bufferIndex, MSG_DONTWAIT) < 0) {
-	    if (errno != EAGAIN) {
+  unsigned int i;
+  for (i = 0; i < countof(global.clients); i++) {
+    int done = 0;
+    while (global.clients[i].id != 0 && global.clients[i].bufferIndex >= 4 && !done) {
+      if (global.clients[i].state == 0) {
+	network_processId(i);
+      } else if (global.clients[i].state < ROIDSERVER_READY_STATE) {	
+	network_processPing(i);
+      } else if (global.clients[i].state == ROIDSERVER_READY_STATE) {
+	done = 1;
+	unsigned int d;
+	for (d = 0; d < countof(global.clients); d++) {
+	  if (global.clients[i].id == global.clients[d].id &&  global.clients[d].state == ROIDSERVER_READY_STATE && i != d) {
+	    if (send(global.clients[d].socketFD, global.clients[i].buffer, global.clients[i].bufferIndex, MSG_DONTWAIT) < 0) {
 	      network_removeConnection(i);
 	    }
+	    global.clients[i].bufferIndex = 0;
+	    break;
 	  }
-	  global.clients[i].bufferIndex = 0;
-	  break;
 	}
       }
     }
@@ -214,8 +295,9 @@ network_processClientData(fd_set *read_fds, fd_set* except_fds)
 {
   (void)except_fds;
 
-  for (size_t i = 0; i < countof(global.clients); i++) {
-    if (global.clients[i].id && FD_ISSET(global.clients[i].socketFD, read_fds)) {
+  unsigned int i;
+  for (i = 0; i < countof(global.clients); i++) {
+    if (global.clients[i].id > 0 &&( FD_ISSET(global.clients[i].socketFD, read_fds))) {
       int done = 0;
       do {
 	int len = recv(global.clients[i].socketFD, &global.clients[i].buffer[global.clients[i].bufferIndex], 1, MSG_DONTWAIT);
@@ -247,7 +329,8 @@ network_setupFDS(fd_set *read_fds, fd_set *write_fds, fd_set *except_fds)
 
   int maxFD = global.serverFD;
 
-  for (size_t i = 0; i < countof(global.clients); i++) {
+  unsigned int i;
+  for (i = 0; i < countof(global.clients); i++) {
     if (global.clients[i].id) {
       if (global.clients[i].socketFD > maxFD) {
 	maxFD = global.clients[i].socketFD;
@@ -264,12 +347,14 @@ network_setupFDS(fd_set *read_fds, fd_set *write_fds, fd_set *except_fds)
 static void
 network_addConnection(int socketFD)
 {
-  for (size_t i = 0; i < countof(global.clients); i++) {
+  unsigned int i;
+  for (i = 0; i < countof(global.clients); i++) {
     if (global.clients[i].id == 0) {
       global.clients[i].id = 1;
+      global.clients[i].state = 0;
       global.clients[i].socketFD = socketFD;
       global.clients[i].bufferIndex = 0;
-      debug_printInt("network_addConnection: new client slot: ", i);
+      printf("network_addConnection: new client slot: %d: fd: %d\n", i, socketFD);
       return;
     }
   }
@@ -296,8 +381,9 @@ main(int argc, char** argv)
 
   int maxFD = 0;
 
-  do {
+  debug_print("roidserver: ready\n");
 
+  do {
     maxFD = network_setupFDS(&read_fds, &write_fds, &except_fds);
 
     int task = select(maxFD + 1, &read_fds, NULL/*&write_fds*/, &except_fds, NULL);
@@ -317,15 +403,10 @@ main(int argc, char** argv)
 	}
       }
 
-      if (FD_ISSET(global.serverFD, &except_fds)) {
-	debug_print("main: server exception\n");
-      }
-
       network_processClientData(&read_fds, &except_fds);
       network_sendClientData();
     }
   } while (1);
-
 
 
   return 0;
