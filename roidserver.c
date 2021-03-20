@@ -513,7 +513,7 @@ http_processRequest(int i)
   network_assertValidStatus(i);
 
   int found = 0;
-  if (strstr(global.status[i].buffer, "GET / ") != NULL) {
+  if (strstr(global.status[i].buffer, "GET /9000 ") != NULL) {
     found = http_sendFile(i, "roid.html", "text/html", 10000);
   } else if (strstr(global.status[i].buffer, "GET /status") != NULL) {
     const char* buffer = html_renderStatusHTML();
@@ -528,7 +528,7 @@ http_processRequest(int i)
   }
 
   if (!found) {
-    http_sendResponse(global.status[i].socketFD, 404, "Not found", "text/html", 0, "<html><body>NOPE</body></html>", 10); // TODO
+    http_sendFile(i, "404.html", "text/html", 10000);
   }
 }
 

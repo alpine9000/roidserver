@@ -1,0 +1,50 @@
+<html>
+  <head>
+    <style type="text/css">
+      @font-face {
+	  font-family:Topaz;
+	  src: url(/Sans.ttf) format("truetype");
+      }
+
+      body {
+	  color: red;
+	  width: 100%;
+	  background: black;
+	  text-align: center;
+      }
+
+      #guru {
+	  margin-top: 2em;
+	  display: inline-block;
+	  width: 640px;
+	  text-align: center;
+	  border: solid 6px red;
+	  font-family: 'Topaz';
+	  padding: 1.5em;
+      }
+
+      #guru.border-off {
+	  border: solid 6px black;
+      }
+
+    </style>
+    <script type="text/javascript">
+      function flashGuru()
+      {
+	  var guru = document.getElementById("guru");
+	  guru.classList.toggle("border-off");
+
+	  window.setTimeout(flashGuru, 1000);
+      }
+
+      window.setTimeout(flashGuru, 1000);
+    </script>
+    <title>404 - Not found</title>
+  </head>
+  <body>
+    <div id="guru">
+      Software Failure.&nbsp;&nbsp;&nbsp;&nbsp;Press left mouse button to continue.<br><br>
+      Guru Meditation #00000025.74431639
+    </div>
+  </body>
+</html>
