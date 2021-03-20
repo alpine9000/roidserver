@@ -6,7 +6,8 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #else
-#include <winsock.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #define MSG_DONTWAIT 0
 #endif
 #include <stdlib.h>
@@ -32,11 +33,14 @@
 #define ROIDSERVER_MAX_CLIENTS 16
 #define ROIDSERVER_READY_STATE (ROIDSERVER_NUM_PING_PACKETS+1)
 
+#ifndef max
 #define max(a, b) (a > b ? a : b)
+#endif
 
-#if __STDC_VERSION__ < 199901L
-#define strlcat(a, b, c) strcat(a, b)
-#define strlcpy(a, b, c) strcpy(a, b)
+#if __STDC_VERSION__ < 199901L || defined(AMIGA) || defined(_WIN32)
+#define strlcat(a, b, c) _strlcat(a, b, c)
+#define strlcpy(a, b, c) _strlcpy(a, b, c)
+#define ROID_NEED_SAFE_STRING_FILLS
 #endif
 
 #ifndef AMIGA
@@ -85,26 +89,55 @@ static const int ONE = 1;
 struct Library *SocketBase = 0;
 #endif
 
-static char *
-debug_itoa(int32_t i)
-{
-  static char buf[12];
-  char *p = buf + 11;
-  if (i >= 0) {
-    do {
-      *--p = '0' + (i % 10);
-      i /= 10;
-    } while (i != 0);
-    return p;
-  } else {
-    do {
-      *--p = '0' - (i % 10);
-      i /= 10;
-    } while (i != 0);
-    *--p = '-';
+
+#ifdef ROID_NEED_SAFE_STRING_FILLS
+
+static int
+_strlcpy(char * dest, char * src, int max) {
+  int len = strlen(src);
+  if (len + 1 < max) {
+    memcpy(dest, src, len + 1);
+  } else if (max != 0) {
+    memcpy(dest, src, max - 1);
+    dest[len-1] = 0;
   }
-  return p;
+
+  return len;
 }
+
+
+static int
+_strnlen(char *s, size_t max)
+{
+  unsigned int i;
+
+  for (i = 0; i < max; i++, s++) {
+    if (*s == 0) {
+      break;
+    }
+  }
+
+  return (i);
+}
+
+
+static int
+_strlcat(char * dest, char * src, int maxlen)
+{
+    int srcLen = strlen(src);
+    int destLen = _strnlen(dest, maxlen);
+    if (destLen == maxlen) {
+      return destLen+srcLen;
+    }
+    if (srcLen < maxlen-destLen) {
+      memcpy(dest+destLen, src, srcLen+1);
+    } else {
+      memcpy(dest+destLen, src, maxlen-1);
+      dest[destLen+maxlen-1] = 0;
+    }
+    return destLen + srcLen;
+}
+#endif
 
 static void
 network_exit(int error)
@@ -427,8 +460,8 @@ html_renderClientTable(void)
     unsigned i;
     for (i = 0; i < countof(global.clients); i++) {
       if (global.clients[i].id) {
-	char line[255];
-	char ltime[80];
+	static char line[255];
+	static char ltime[80];
 	struct tm *info = localtime(&global.clients[i].connected);
 	strftime(ltime, sizeof(ltime) ,"%x - %I:%M%p", info);
 	snprintf(line, sizeof(line), "<tr><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>", i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].sent, global.clients[i].recv, global.clients[i].lag, ltime);
@@ -465,18 +498,37 @@ html_renderStatusHTML(void)
 }
 
 
-static void
-http_sendResponse(int fd, int status, const char* desc, const char* contentType, int cacheSeconds, const char* data, int length)
+static int
+network_sendStatus(int statusIndex, void* data, int len)
 {
-  char header[512];
+  network_assertValidStatus(statusIndex);
+
+  if (send(global.status[statusIndex].socketFD, data, len, MSG_DONTWAIT) != len) {
+    network_removeStatusConnection(statusIndex);
+    return 0;
+  }
+  return len;
+}
+
+
+static void
+http_sendResponse(int statusIndex, int status, const char* desc, const char* contentType, int cacheSeconds, const char* data, int length)
+{
+  network_assertValidStatus(statusIndex);
+
+  static char header[512];
   snprintf(header, sizeof(header),  "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nConnection: keep-alive\r\nContent-Length: %d", status, desc, contentType, length);
   if (cacheSeconds) {
     strlcat(header, "\r\nCache-Control: max-age=", sizeof(header));
-    strlcat(header, debug_itoa(cacheSeconds), sizeof(header));
+    static char seconds[20];
+    snprintf(seconds, sizeof(seconds), "%d", cacheSeconds);
+    strlcat(header, seconds, sizeof(header));
   }
   strlcat(header, "\r\n\r\n", sizeof(header));
-  send(fd, header, strlen(header), 0);
-  send(fd, data, length, 0);
+  if (network_sendStatus(statusIndex, header, strlen(header))) {
+    return;
+  }
+  network_sendStatus(statusIndex, (void*)data, length);
 }
 
 
@@ -495,7 +547,7 @@ http_sendFile(int i, const char* filename, const char* contentType, int cacheSec
 	int len = read(fd, buffer, st.st_size);
 	if (len) {
 	  buffer[len] = 0;
-	  http_sendResponse(global.status[i].socketFD, 200, "OK", contentType, cacheSeconds, buffer, len);
+	  http_sendResponse(i, 200, "OK", contentType, cacheSeconds, buffer, len);
 	  found = 1;
 	}
 	close(fd);
@@ -507,6 +559,7 @@ http_sendFile(int i, const char* filename, const char* contentType, int cacheSec
   return found;
 }
 
+
 static void
 http_processRequest(int i)
 {
@@ -517,7 +570,7 @@ http_processRequest(int i)
     found = http_sendFile(i, "roid.html", "text/html", 10000);
   } else if (strstr(global.status[i].buffer, "GET /status") != NULL) {
     const char* buffer = html_renderStatusHTML();
-    http_sendResponse(global.status[i].socketFD, 200, "OK", "text/html", 0, buffer, strlen(buffer));
+    http_sendResponse(i, 200, "OK", "text/html", 0, buffer, strlen(buffer));
     found = 1;
   } else if (strstr(global.status[i].buffer, "GET /roid.css") != NULL) {
     found = http_sendFile(i, "roid.css", "text/css", 10000);
@@ -668,7 +721,11 @@ network_addConnection(int socketFD)
       time(&global.clients[i].connected);
       socklen_t addr_size = sizeof(struct sockaddr_in);
       getpeername(socketFD, (struct sockaddr *)&global.clients[i].addr, &addr_size);
+#ifdef AMIGA
+      strlcpy(global.clients[i].ip, Inet_NtoA(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
+#else
       strlcpy(global.clients[i].ip, inet_ntoa(global.clients[i].addr.sin_addr), sizeof(global.clients[i].ip));
+#endif
       printf("network_addConnection: new client slot: %d fd: %d\n", i, socketFD);
       return;
     }
