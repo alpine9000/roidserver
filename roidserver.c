@@ -525,7 +525,8 @@ http_sendResponse(int statusIndex, int status, const char* desc, const char* con
     strlcat(header, seconds, sizeof(header));
   }
   strlcat(header, "\r\n\r\n", sizeof(header));
-  if (network_sendStatus(statusIndex, header, strlen(header))) {
+  const int len = strlen(header);
+  if (network_sendStatus(statusIndex, header, len) != len) {
     return;
   }
   network_sendStatus(statusIndex, (void*)data, length);
