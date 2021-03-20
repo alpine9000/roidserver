@@ -1,0 +1,28 @@
+<html>
+  <head>
+    <title>Roidserver Status</title>
+    <link rel="stylesheet" type="text/css" href="roid.css">
+  </head>
+  <body>
+    <h1>Roidserver Dashboard</h1>
+    <div id="status"></div>
+  </body>
+  <script type="text/javascript">
+    function updateStatus()
+    {
+	var opts = {
+	    method: 'GET',
+	    headers: {}
+	};
+
+	fetch('/status', opts).then(function (response) {
+	    return response.text();
+	}).then(function (body) {
+	    document.getElementById("status").innerHTML = body;
+	});
+
+	window.setTimeout(updateStatus, 1000);
+    }
+    updateStatus();
+  </script>
+</html>

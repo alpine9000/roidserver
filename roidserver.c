@@ -15,6 +15,7 @@
 #include <string.h>
 #include <time.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #ifndef _MSC_VER
 #include <unistd.h>
@@ -61,6 +62,8 @@ typedef struct {
   char ip[20];
   time_t connected;
   uint32_t lag;
+  int sent;
+  int recv;
 } client_connection_t;
 
 typedef struct {
@@ -317,6 +320,18 @@ network_processId(int index)
   }
 }
 
+static int
+network_send(int clientIndex, void* data, int len)
+{
+  if (send(global.clients[clientIndex].socketFD, data, len, MSG_DONTWAIT) != len) {
+    network_removeConnection(clientIndex);
+  } else {
+    global.clients[clientIndex].sent += len;
+    return len;
+  }
+
+  return 0;
+}
 
 static void
 network_processPing(int index)
@@ -326,10 +341,7 @@ network_processPing(int index)
   printf("network_processPing: %d: %x\n", index, packet);
   if (packet == 0xdeadbeef) {
     global.clients[index].state++;
-    if (send(global.clients[index].socketFD, (void*)&packet, sizeof(packet), MSG_DONTWAIT) != sizeof(packet)) {
-      network_removeConnection(index);
-    }
-
+    network_send(index, (void*)&packet, sizeof(packet));
   } else {
     network_removeConnection(index);
   }
@@ -365,9 +377,7 @@ network_sendClientData(void)
 	unsigned int d;
 	for (d = 0; d < countof(global.clients); d++) {
 	  if (global.clients[i].id == global.clients[d].id &&  global.clients[d].state >= ROIDSERVER_READY_STATE && i != d) {
-	    if (send(global.clients[d].socketFD, global.clients[i].buffer, global.clients[i].bufferIndex, MSG_DONTWAIT) < 0) {
-	      network_removeConnection(i);
-	    }
+	    network_send(d, (void*)global.clients[i].buffer, global.clients[i].bufferIndex);
 	    global.clients[i].bufferIndex = 0;
 	    break;
 	  }
@@ -409,59 +419,93 @@ network_numStatusConnections(void)
 static const char*
 html_renderClientTable(void)
 {
-  static char buffer[1024];
-  snprintf(buffer, sizeof(buffer), "<table><thead><tr><th>Slot</th><th>Remote IP</th><th>State</th><th>Game ID</th><th>Lag</th><th>Connected</th></tr></thead>");
+  static char buffer[32768];
 
-  unsigned i;
-  for (i = 0; i < countof(global.clients); i++) {
-    if (global.clients[i].id || 1) {
-      char line[255];
-      char ltime[80];
-      struct tm *info = localtime(&global.clients[i].connected);
-      strftime(ltime, sizeof(ltime) ,"%x - %I:%M%p", info);
-      snprintf(line, sizeof(line), "<tr><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%s</td></tr>", i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].lag, ltime);
-      strlcat(buffer, line, sizeof(buffer));
+  if (network_numClientConnections()) {
+    snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Clients</div><table><thead><tr><th>Slot</th><th>Remote IP</th><th>State</th><th>Game ID</th><th>Sent</th><th>Recv'd</th><th>Lag</th><th>Connected</th></tr></thead></div>");
+
+    unsigned i;
+    for (i = 0; i < countof(global.clients); i++) {
+      if (global.clients[i].id) {
+	char line[255];
+	char ltime[80];
+	struct tm *info = localtime(&global.clients[i].connected);
+	strftime(ltime, sizeof(ltime) ,"%x - %I:%M%p", info);
+	snprintf(line, sizeof(line), "<tr><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>", i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].sent, global.clients[i].recv, global.clients[i].lag, ltime);
+	strlcat(buffer, line, sizeof(buffer));
+      }
     }
+
+    strlcat(buffer, "</table>", sizeof(buffer));
+  } else {
+    buffer[0] = 0;
   }
 
-  strlcat(buffer, "</table>", sizeof(buffer));
   return buffer;
 }
+
 
 static const char*
 html_renderStatusSummary(void)
 {
   static char buffer[1024];
 
-  snprintf(buffer, sizeof(buffer), "<table><thead><tr><th>Client Connections</th><th>Status Connections</th></tr></thead><tr><td>%d</td><td>%d</td></tr></table>", network_numClientConnections(), network_numStatusConnections());
+  snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Status</div><table><thead><tr><th>Client Connections</th><th>Status Connections</th></tr></thead><tr><td>%d</td><td>%d</td></tr></table></div>", network_numClientConnections(), network_numStatusConnections());
 
   return buffer;
 }
+
 
 static const char*
 html_renderStatusHTML(void)
 {
   static char buffer[1024];
-  snprintf(buffer, sizeof(buffer), "<html><head><title>Roidserver Status</title><link rel=\"stylesheet\" type=\"text/css\" href=\"roid.css\"></head><body>%s%s</body></html>\r\n\r\n", html_renderStatusSummary(), html_renderClientTable());
+  snprintf(buffer, sizeof(buffer), "%s%s", html_renderStatusSummary(), html_renderClientTable());
   return buffer;
 }
 
+
 static void
-http_sendResponse(int fd, int status, const char* desc, const char* contentType, int cacheSeconds, const char* html)
+http_sendResponse(int fd, int status, const char* desc, const char* contentType, int cacheSeconds, const char* data, int length)
 {
   char header[512];
-  snprintf(header, sizeof(header),  "HTTP/1.1 %d %s\r\nContent-Type: %s; charset=utf-8\r\nConnection: keep-alive\r\nContent-Length: %ld", status, desc, contentType, strlen(html));
+  snprintf(header, sizeof(header),  "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nConnection: keep-alive\r\nContent-Length: %d", status, desc, contentType, length);
   if (cacheSeconds) {
     strlcat(header, "\r\nCache-Control: max-age=", sizeof(header));
     strlcat(header, debug_itoa(cacheSeconds), sizeof(header));
-    strlcat(header, "\r\n", sizeof(header));
   }
   strlcat(header, "\r\n\r\n", sizeof(header));
   send(fd, header, strlen(header), 0);
-  send(fd, html, strlen(html), 0);
-
+  send(fd, data, length, 0);
 }
 
+
+static int
+http_sendFile(int i, const char* filename, const char* contentType, int cacheSeconds)
+{
+  network_assertValidStatus(i);
+  int found = 0;
+
+  struct stat st;
+  if (stat(filename, &st) == 0) {
+    char* buffer = malloc(st.st_size+1);
+    if (buffer) {
+      int fd = open(filename, O_RDONLY);
+      if (fd >= 0) {
+	int len = read(fd, buffer, st.st_size);
+	if (len) {
+	  buffer[len] = 0;
+	  http_sendResponse(global.status[i].socketFD, 200, "OK", contentType, cacheSeconds, buffer, len);
+	  found = 1;
+	}
+	close(fd);
+      }
+      free(buffer);
+    }
+  }
+
+  return found;
+}
 
 static void
 http_processRequest(int i)
@@ -470,29 +514,21 @@ http_processRequest(int i)
 
   int found = 0;
   if (strstr(global.status[i].buffer, "GET / ") != NULL) {
+    found = http_sendFile(i, "roid.html", "text/html", 10000);
+  } else if (strstr(global.status[i].buffer, "GET /status") != NULL) {
     const char* buffer = html_renderStatusHTML();
-    http_sendResponse(global.status[i].socketFD, 200, "OK", "text/html", 0, buffer);
+    http_sendResponse(global.status[i].socketFD, 200, "OK", "text/html", 0, buffer, strlen(buffer));
     found = 1;
   } else if (strstr(global.status[i].buffer, "GET /roid.css") != NULL) {
-    char* buffer = malloc(8192);
-    if (buffer) {
-      int fd = open("roid.css", O_RDONLY);
-      if (fd >= 0) {
-	int len = read(fd, buffer, 8191);
-	if (len) {
-	  buffer[8191] = 0;
-	  http_sendResponse(global.status[i].socketFD, 200, "OK", "text/css", 10000, buffer);
-	  found = 1;
-	}
-	close(fd);
-      }
-      free(buffer);
-    }
-
+    found = http_sendFile(i, "roid.css", "text/css", 10000);
+  } else if (strstr(global.status[i].buffer, "GET /favicon.ico") != NULL) {
+    found = http_sendFile(i, "roid.ico", "image/vnd.microsoft.icon", 10000);
+  } else if (strstr(global.status[i].buffer, "GET /Sans.ttf") != NULL) {
+    found = http_sendFile(i, "Sans.ttf", "font/ttf", 10000);
   }
 
   if (!found) {
-    http_sendResponse(global.status[i].socketFD, 404, "Not found", "text/html", 0, "<html><body>NOPE</body></html>");
+    http_sendResponse(global.status[i].socketFD, 404, "Not found", "text/html", 0, "<html><body>NOPE</body></html>", 10); // TODO
   }
 }
 
@@ -543,6 +579,7 @@ network_processClientData(fd_set *read_fds)
       do {
 	int len = recv(global.clients[i].socketFD, &global.clients[i].buffer[global.clients[i].bufferIndex], 1, MSG_DONTWAIT);
 	if (len > 0) {
+	  global.clients[i].recv++;
 	  if (global.clients[i].bufferIndex < (int)(countof(global.clients[i].buffer)-1)) {
 	    global.clients[i].bufferIndex++;
 	  }
@@ -624,10 +661,10 @@ network_addConnection(int socketFD)
   unsigned int i;
   for (i = 0; i < countof(global.clients); i++) {
     if (global.clients[i].id == 0) {
+      memset(&global.clients[i], 0, sizeof(global.clients[i]));
       global.clients[i].id = 1;
-      global.clients[i].state = 0;
       global.clients[i].socketFD = socketFD;
-      global.clients[i].bufferIndex = 0;
+
       time(&global.clients[i].connected);
       socklen_t addr_size = sizeof(struct sockaddr_in);
       getpeername(socketFD, (struct sockaddr *)&global.clients[i].addr, &addr_size);
