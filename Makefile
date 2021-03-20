@@ -8,7 +8,7 @@ WARNINGS=-Wno-error=format -Wno-format -Wall -Werror -Wall -Wpedantic -Wno-unkno
 OBJS=$(addprefix build/obj/, $(SRCS:.c=.o))
 CFLAGS=$(WARNINGS) $(DEBUG_CFLAGS)
 
-STATIC_ANALYZE=-fsanitize=address -fsanitize=undefined
+STATIC_ANALYZE=-g -fsanitize=address -fsanitize=undefined
 
 WIN32_OBJS=$(addprefix build/win32/, $(SRCS:.c=.o))
 WIN32_CC=/usr/local/mingw/bin/x86_64-w64-mingw32-gcc
