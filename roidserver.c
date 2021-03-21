@@ -44,14 +44,30 @@
 #define ROID_NEED_SAFE_STRING_FILLS
 #endif
 
-#ifndef AMIGA
+
 #ifdef _WIN32
-#define debug_errno(x) printf(x"%s\n", WSAGetLastError());
+#define log_getError() _w32_getError()
 #else
-#define debug_errno(x) printf(x"%s\n", strerror(errno));
+#define log_getError() strerror(errno)
 #endif
-#else
-#define debug_errno(x) printf(x"%s\n", Errno());
+
+#ifdef _WIN32
+const char*
+_w32_getError(void)
+{
+  if (errno) {
+    return strerror(errno);
+  }
+
+  static char buffer[256];
+  buffer[0] = 0;
+
+  FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL,
+		WSAGetLastError(),
+		MAKELANGID (LANG_NEUTRAL, SUBLANG_DEFAULT),
+		buffer,	sizeof(buffer),	NULL);
+  return buffer;
+}
 #endif
 
 
@@ -220,7 +236,7 @@ network_serverTCP(int port)
   socket_fd = socket(AF_INET, SOCK_STREAM, 0);
 
   if (socket_fd < 0) {
-    debug_errno("network_serverTCP: socket() failed:");
+    log_printf("network_serverTCP: socket() failed: %s\n", log_getError());
     return -1;
   }
 
@@ -232,13 +248,13 @@ network_serverTCP(int port)
   setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, (void*) &ONE, sizeof(ONE));
 
   if (bind(socket_fd, (struct sockaddr *)&sa, sizeof(sa)) == -1) {
-    debug_errno("network_serverTCP: bind() failed: ");
+    log_printf("network_serverTCP: bind() failed: %s\n", log_getError());
     network_closeSocket(socket_fd);
     return -1;
   }
 
   if (listen(socket_fd,5)) {
-    debug_errno("network_serverTCP: listen() failed: ");
+    log_printf("network_serverTCP: listen() failed: %s\n", log_getError());
   }
 
 #ifdef AMIGA
@@ -301,7 +317,7 @@ network_accept(int serverFD)
   } while (accept_fd == -1);
   if (accept_fd < 0 ) {
     if (accept_fd < 0) {
-      debug_errno("network_accept: accept() failed: ");
+      log_printf("network_accept: accept() failed: %s\n", log_getError());
     } else {
       network_closeSocket(accept_fd);
     }
@@ -600,6 +616,8 @@ http_processRequest(int i)
     found = http_sendFile(i, "roid.ico", "image/vnd.microsoft.icon", 10000);
   } else if (strstr(global.status[i].buffer, "GET /Sans.ttf") != NULL) {
     found = http_sendFile(i, "Sans.ttf", "font/ttf", 10000);
+  } else if (strstr(global.status[i].buffer, "GET /exit") != NULL) {
+    //    network_exit(0);
   }
 
   if (!found) {
@@ -660,7 +678,7 @@ network_processClientData(fd_set *read_fds)
 	  }
 	} else {
 	  if (len == 0) {
-	    log_printf("network_processClientData: failed %s\n", strerror(errno));
+	    log_printf("network_processClientData: failed %s\n", log_getError());
 	    network_removeConnection(i);
 	  }
 	  done = 1;
@@ -790,6 +808,11 @@ main(int argc, char** argv)
   }
 #endif
 
+#ifdef _WIN32
+  WSADATA wsaData;
+  WSAStartup(MAKEWORD(2,2), &wsaData);
+#endif
+
   unsigned int i;
   for (i = 0; i < countof(global.status); i++) {
     global.status[i].socketFD = -1;
@@ -818,14 +841,14 @@ main(int argc, char** argv)
 
     switch (task) {
     case -1:
-      debug_errno("main: select failed\n");
+      log_printf("main: select failed: %s\n", log_getError());
       network_exit(3);
       break;
     default:
       if (FD_ISSET(global.serverFD, &read_fds)) {
 	int clientFD = network_accept(global.serverFD);
 	if (clientFD < 0) {
-	  debug_errno("main: network_accept failed\n");
+	  log_printf("main: network_accept failed: %s\n", log_getError());
 	} else {
 	  network_addConnection(clientFD);
 	}
@@ -834,7 +857,7 @@ main(int argc, char** argv)
       if (FD_ISSET(global.statusFD, &read_fds)) {
 	int clientFD = network_accept(global.statusFD);
 	if (clientFD < 0) {
-	  debug_errno("main: network_accept failed\n");
+	  log_printf("main: network_accept failed: %s\n", log_getError());
 	} else {
 	  network_addStatus(clientFD);
 	}
