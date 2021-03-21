@@ -1,16 +1,4 @@
 
-#ifndef _WIN32
-#include <netinet/tcp.h>
-#include <sys/ioctl.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <signal.h>
-#else
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#define MSG_DONTWAIT 0
-#endif
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
@@ -19,6 +7,18 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <stdint.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define MSG_DONTWAIT 0
+#else
+#include <netinet/tcp.h>
+#include <sys/ioctl.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <signal.h>
+#endif
 
 #ifndef _MSC_VER
 #include <unistd.h>
@@ -30,8 +30,6 @@
 #define localtime_r(a, b) localtime(a)
 #endif
 
-
-
 #define ROIDSERVER_NUM_PING_PACKETS 8
 #define ROIDSERVER_MAX_CLIENTS 16
 #define ROIDSERVER_READY_STATE (ROIDSERVER_NUM_PING_PACKETS+1)
@@ -40,7 +38,7 @@
 #define max(a, b) (a > b ? a : b)
 #endif
 
-#if __STDC_VERSION__ < 199901L || defined(AMIGA) || defined(_WIN32)
+#if __STDC_VERSION__ < 199901L || defined(AMIGA) || defined(_WIN32) || defined(__linux__)
 #define strlcat(a, b, c) _strlcat(a, b, c)
 #define strlcpy(a, b, c) _strlcpy(a, b, c)
 #define ROID_NEED_SAFE_STRING_FILLS
@@ -110,6 +108,7 @@ typedef struct {
   status_connection_t status[ROIDSERVER_MAX_CLIENTS];
 } global_t;
 
+
 static global_t global;
 static const int ONE = 1;
 #ifdef AMIGA
@@ -151,18 +150,18 @@ _strnlen(char *s, size_t max)
 static int
 _strlcat(char * dest, char * src, int maxlen)
 {
-    int srcLen = strlen(src);
-    int destLen = _strnlen(dest, maxlen);
-    if (destLen == maxlen) {
-      return destLen+srcLen;
-    }
-    if (srcLen < maxlen-destLen) {
-      memcpy(dest+destLen, src, srcLen+1);
-    } else {
-      memcpy(dest+destLen, src, maxlen-1);
-      dest[destLen+maxlen-1] = 0;
-    }
-    return destLen + srcLen;
+  int srcLen = strlen(src);
+  int destLen = _strnlen(dest, maxlen);
+  if (destLen == maxlen) {
+    return destLen+srcLen;
+  }
+  if (srcLen < maxlen-destLen) {
+    memcpy(dest+destLen, src, srcLen+1);
+  } else {
+    memcpy(dest+destLen, src, maxlen-1);
+    dest[destLen+maxlen-1] = 0;
+  }
+  return destLen + srcLen;
 }
 #endif
 
@@ -203,11 +202,11 @@ static void
 network_closeSocket(int fd)
 {
 #ifdef AMIGA
-    CloseSocket(fd);
+  CloseSocket(fd);
 #elif defined(_WIN32)
-    closesocket(fd);
+  closesocket(fd);
 #else
-    close(fd);
+  close(fd);
 #endif
 }
 
@@ -216,7 +215,6 @@ static int
 network_serverTCP(int port)
 {
   int socket_fd;
-
   struct sockaddr_in sa;
 
   socket_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -380,6 +378,7 @@ network_processId(int index)
   }
 }
 
+
 static int
 network_send(int clientIndex, void* data, int len)
 {
@@ -393,6 +392,7 @@ network_send(int clientIndex, void* data, int len)
 
   return 0;
 }
+
 
 static void
 network_processPing(int index)
@@ -678,7 +678,7 @@ network_processClientData(fd_set *read_fds)
 	  }
 	} else {
 	  if (len == 0) {
-	    log_printf("network_processClientData: failed\n");
+	    log_printf("network_processClientData: failed %s\n", strerror(errno));
 	    network_removeConnection(i);
 	  }
 	  done = 1;
