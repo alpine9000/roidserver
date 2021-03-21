@@ -36,7 +36,7 @@ h1 {
 
 thead tr {
     color: #222;
-    background: #AAA;
+    background: #999;
 }
 
 table {
@@ -80,8 +80,6 @@ tbody tr:nth-child(even) {
 }
 
 tbody tr {
-  font-size: 15px;
   color: #444;
-  line-height: 1.2;
-  font-weight: unset;
+  line-height: 1.4em;
 }

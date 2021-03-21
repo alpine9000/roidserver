@@ -479,47 +479,29 @@ network_numStatusConnections(void)
 
 
 static const char*
-html_renderClientTable(void)
+html_renderStatusHTML(void)
 {
+  static char line[255];
   static char buffer[32768];
 
+  snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Status</div><table><thead><tr><th>Client Connections</th><th>Status Connections</th><th>Current Time</th></tr></thead><tr><td>%d</td><td>%d</td><td id=\"time\"></td></tr></table></div>", network_numClientConnections(), network_numStatusConnections());
+
   if (network_numClientConnections()) {
-    snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Clients</div><table><thead><tr><th>Slot</th><th>Remote IP</th><th>State</th><th>Game ID</th><th>Sent</th><th>Recv'd</th><th>Lag</th><th>Connected</th></tr></thead></div>");
+    snprintf(line, sizeof(line), "<div class=\"container\"><div class=\"titlebar\">Clients</div><table><thead><tr><th>Slot</th><th>Remote IP</th><th>State</th><th>Game ID</th><th>Sent</th><th>Recv'd</th><th>Lag</th><th>Connected</th></tr></thead></div>");
+    strlcat(buffer, line, sizeof(buffer));
 
     unsigned i;
     for (i = 0; i < countof(global.clients); i++) {
       if (global.clients[i].id) {
-	static char line[255];
+
 	snprintf(line, sizeof(line), "<tr><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%d</td><td>%d</td><td class=\"time\">%ld</td></tr>\n", i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].sent, global.clients[i].recv, global.clients[i].lag, global.clients[i].connected);
 	strlcat(buffer, line, sizeof(buffer));
       }
     }
 
     strlcat(buffer, "</table>", sizeof(buffer));
-  } else {
-    buffer[0] = 0;
   }
 
-  return buffer;
-}
-
-
-static const char*
-html_renderStatusSummary(void)
-{
-  static char buffer[1024];
-
-  snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Status</div><table><thead><tr><th>Client Connections</th><th>Status Connections</th></tr></thead><tr><td>%d</td><td>%d</td></tr></table></div>", network_numClientConnections(), network_numStatusConnections());
-
-  return buffer;
-}
-
-
-static const char*
-html_renderStatusHTML(void)
-{
-  static char buffer[32768];
-  snprintf(buffer, sizeof(buffer), "%s%s", html_renderStatusSummary(), html_renderClientTable());
   return buffer;
 }
 
