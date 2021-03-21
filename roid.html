@@ -8,6 +8,15 @@
     <div id="status"></div>
   </body>
   <script type="text/javascript">
+    function format_time(s) {
+	const dtFormat = new Intl.DateTimeFormat('en-GB', {
+	    dateStyle: 'short', 
+	    timeStyle: 'medium',
+	});
+	
+	return dtFormat.format(new Date(s * 1e3));
+    }
+    
     function updateStatus()
     {
 	var opts = {
@@ -15,10 +24,16 @@
 	    headers: {}
 	};
 
+	
 	fetch('/status', opts).then(function (response) {
 	    return response.text();
 	}).then(function (body) {
 	    document.getElementById("status").innerHTML = body;
+	    var x = document.getElementsByClassName("time ");
+	    var i;
+	    for (i = 0; i < x.length; i++) {
+		x[i].innerText = format_time(parseInt(x[i].innerText));
+	    }
 	});
 
 	window.setTimeout(updateStatus, 1000);

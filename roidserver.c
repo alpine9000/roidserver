@@ -10,6 +10,7 @@
 #include <ws2tcpip.h>
 #define MSG_DONTWAIT 0
 #endif
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
@@ -17,6 +18,7 @@
 #include <time.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <stdint.h>
 
 #ifndef _MSC_VER
 #include <unistd.h>
@@ -25,9 +27,10 @@
 #ifdef AMIGA
 #include <proto/exec.h>
 #include <proto/socket.h>
+#define localtime_r(a, b) localtime(a)
 #endif
 
-#include <stdint.h>
+
 
 #define ROIDSERVER_NUM_PING_PACKETS 8
 #define ROIDSERVER_MAX_CLIENTS 16
@@ -53,6 +56,30 @@
 #define debug_errno(x) printf(x"%s\n", Errno());
 #endif
 
+
+#ifdef _WIN32
+#define log_printNow() do {						\
+    time_t t;								\
+    time(&t);								\
+    struct tm now;							\
+    localtime_s(&now, &t);						\
+    printf("%02d:%02d:%02d : ", now.tm_hour, now.tm_min, now.tm_sec);	\
+  } while (0);
+#else
+#define log_printNow() do {						\
+    time_t t;								\
+    time(&t);								\
+    struct tm *l;							\
+    struct tm now;							\
+    l = localtime_r(&t, &now);						\
+    printf("%02d:%02d:%02d : ", l->tm_hour, l->tm_min, l->tm_sec);	\
+  } while(0);
+#endif
+
+#define log_printf(...) do {						\
+    log_printNow();							\
+    printf(__VA_ARGS__);						\
+  } while(0);
 
 #define countof(x) (sizeof(x)/sizeof(x[0]))
 
@@ -139,6 +166,7 @@ _strlcat(char * dest, char * src, int maxlen)
 }
 #endif
 
+
 static void
 network_exit(int error)
 {
@@ -155,7 +183,7 @@ static void
 network_assertValidClient(int index)
 {
   if (index < 0 || index >= (int)countof(global.clients)) {
-    printf("network_assertValidClient: invalid client: %d\n", index);
+    log_printf("network_assertValidClient: invalid client: %d\n", index);
     network_exit(5);
   }
 }
@@ -165,7 +193,7 @@ static void
 network_assertValidStatus(int index)
 {
   if (index < 0 || index >= (int)countof(global.clients)) {
-    printf("network_assertValidStatus: invalid status: %d\n", index);
+    log_printf("network_assertValidStatus: invalid status: %d\n", index);
     network_exit(5);
   }
 }
@@ -198,7 +226,7 @@ network_serverTCP(int port)
     return -1;
   }
 
-  memset(&sa, 0, sizeof(struct sockaddr_in));
+  memset(&sa, 0, sizeof(sa));
   sa.sin_family = AF_INET;
   sa.sin_addr.s_addr = inet_addr("0.0.0.0");
   sa.sin_port = htons(port);
@@ -207,9 +235,7 @@ network_serverTCP(int port)
 
   if (bind(socket_fd, (struct sockaddr *)&sa, sizeof(sa)) == -1) {
     debug_errno("network_serverTCP: bind() failed: ");
-
     network_closeSocket(socket_fd);
-
     return -1;
   }
 
@@ -222,15 +248,15 @@ network_serverTCP(int port)
   IoctlSocket(socket_fd, FIONBIO, (char*)&noblock);
 #else
 #ifdef _WIN32
-    unsigned long noblock = 1;
-    ioctlsocket(socket_fd, FIONBIO, &noblock);
+  unsigned long noblock = 1;
+  ioctlsocket(socket_fd, FIONBIO, &noblock);
 #else
-    int noblock = 1;
-    ioctl(socket_fd, FIONBIO, (char*)&noblock);
+  int noblock = 1;
+  ioctl(socket_fd, FIONBIO, (char*)&noblock);
 #endif
 #endif
 
-    return socket_fd;
+  return socket_fd;
 }
 
 
@@ -242,7 +268,7 @@ network_removeConnection(int index)
   unsigned int i;
   for (i = 0; i < countof(global.clients); i++) {
     if (id == global.clients[i].id) {
-      printf("network_processClientData: removing connection slot: %d\n", i);
+      log_printf("network_processClientData: removing connection slot: %d\n", i);
       network_closeSocket(global.clients[i].socketFD);
       global.clients[i].id = 0;
     }
@@ -319,7 +345,7 @@ network_setId(unsigned int index, uint32_t id)
 
   if (count < 2) {
     global.clients[index].id = id;
-    printf("network_setId: assigning %d to %x\n", index, id);
+    log_printf("network_setId: assigning %d to %x\n", index, id);
   }
 
   return count < 2;
@@ -346,9 +372,10 @@ network_processId(int index)
 {
   network_assertValidClient(index);
   uint32_t packet = network_getPacket(index);
-  printf("network_processId: %d: %x\n", index, packet);
+  log_printf("network_processId: %d: %x\n", index, packet);
   global.clients[index].state++;
   if (!network_setId(index, packet)) {
+    log_printf("network_processId: failed\n");
     network_removeConnection(index);
   }
 }
@@ -357,6 +384,7 @@ static int
 network_send(int clientIndex, void* data, int len)
 {
   if (send(global.clients[clientIndex].socketFD, data, len, MSG_DONTWAIT) != len) {
+    log_printf("network_send: failed\n");
     network_removeConnection(clientIndex);
   } else {
     global.clients[clientIndex].sent += len;
@@ -371,11 +399,12 @@ network_processPing(int index)
 {
   network_assertValidClient(index);
   uint32_t packet = network_getPacket(index);
-  printf("network_processPing: %d: %x\n", index, packet);
+  log_printf("network_processPing: %d: %x\n", index, packet);
   if (packet == 0xdeadbeef) {
     global.clients[index].state++;
     network_send(index, (void*)&packet, sizeof(packet));
   } else {
+    log_printf("network_processPing: failed\n");
     network_removeConnection(index);
   }
 }
@@ -387,7 +416,7 @@ network_processLag(int index)
   network_assertValidClient(index);
   global.clients[index].state++;
   global.clients[index].lag = htonl(*(uint32_t*)global.clients[index].buffer);
-  printf("network_processLag: %d: %x\n", index, global.clients[index].lag);
+  log_printf("network_processLag: %d: %x\n", index, global.clients[index].lag);
 }
 
 
@@ -461,10 +490,7 @@ html_renderClientTable(void)
     for (i = 0; i < countof(global.clients); i++) {
       if (global.clients[i].id) {
 	static char line[255];
-	static char ltime[80];
-	struct tm *info = localtime(&global.clients[i].connected);
-	strftime(ltime, sizeof(ltime) ,"%x - %I:%M%p", info);
-	snprintf(line, sizeof(line), "<tr><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>", i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].sent, global.clients[i].recv, global.clients[i].lag, ltime);
+	snprintf(line, sizeof(line), "<tr><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%d</td><td>%d</td><td class=\"time\">%ld</td></tr>\n", i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].sent, global.clients[i].recv, global.clients[i].lag, global.clients[i].connected);
 	strlcat(buffer, line, sizeof(buffer));
       }
     }
@@ -492,7 +518,7 @@ html_renderStatusSummary(void)
 static const char*
 html_renderStatusHTML(void)
 {
-  static char buffer[1024];
+  static char buffer[32768];
   snprintf(buffer, sizeof(buffer), "%s%s", html_renderStatusSummary(), html_renderClientTable());
   return buffer;
 }
@@ -503,9 +529,22 @@ network_sendStatus(int statusIndex, void* data, int len)
 {
   network_assertValidStatus(statusIndex);
 
-  if (send(global.status[statusIndex].socketFD, data, len, MSG_DONTWAIT) != len) {
-    network_removeStatusConnection(statusIndex);
-    return 0;
+  int done = 0;
+  int sent = 0;
+  int totalSent = 0;
+
+  while (!done) {
+    if ((sent = send(global.status[statusIndex].socketFD, (void*)(((char*)data)+totalSent), len-totalSent, MSG_DONTWAIT)) != len) {
+      if (errno != EAGAIN) {
+	network_removeStatusConnection(statusIndex);
+	done = 1;
+	return 0;
+      } else {
+	totalSent += sent;
+      }
+    } else {
+      done = 1;
+    }
   }
   return len;
 }
@@ -639,6 +678,7 @@ network_processClientData(fd_set *read_fds)
 	  }
 	} else {
 	  if (len == 0) {
+	    log_printf("network_processClientData: failed\n");
 	    network_removeConnection(i);
 	  }
 	  done = 1;
@@ -727,13 +767,13 @@ network_addConnection(int socketFD)
 #else
       strlcpy(global.clients[i].ip, inet_ntoa(global.clients[i].addr.sin_addr), sizeof(global.clients[i].ip));
 #endif
-      printf("network_addConnection: new client slot: %d fd: %d\n", i, socketFD);
+      log_printf("network_addConnection: new client slot: %d fd: %d\n", i, socketFD);
       return;
     }
   }
 
   network_closeSocket(socketFD);
-  printf("network_addConnection: no free slots\n");
+  log_printf("network_addConnection: no free slots\n");
 }
 
 
@@ -745,13 +785,13 @@ network_addStatus(int socketFD)
     if (global.status[i].socketFD < 0) {
       global.status[i].socketFD = socketFD;
       global.status[i].bufferIndex = 0;
-      printf("network_addStatus: new status slot: %d fd: %d\n", i, socketFD);
+      log_printf("network_addStatus: new status slot: %d fd: %d\n", i, socketFD);
       return;
     }
   }
 
   network_closeSocket(socketFD);
-  printf("network_addStatus: no free slots\n");
+  log_printf("network_addStatus: no free slots\n");
 }
 
 
@@ -783,7 +823,7 @@ main(int argc, char** argv)
   fd_set read_fds;
   int maxFD = 0;
 
-  printf("roidserver: ready\n");
+  log_printf("roidserver: ready\n");
 
   do {
     maxFD = network_setupFDS(&read_fds);
