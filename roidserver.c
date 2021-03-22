@@ -30,6 +30,8 @@
 #define localtime_r(a, b) localtime(a)
 #endif
 
+#define ROIDSERVER_GAME_PORT 9000
+#define ROIDSERVER_DASHBOARD_PORT 9001
 #define ROIDSERVER_NUM_PING_PACKETS 8
 #define ROIDSERVER_MAX_CLIENTS 16
 #define ROIDSERVER_READY_STATE (ROIDSERVER_NUM_PING_PACKETS+1)
@@ -93,6 +95,7 @@ _w32_getError(void)
 #define log_printf(...) do {						\
     log_printNow();							\
     printf(__VA_ARGS__);						\
+    fflush(stdout);							\
   } while(0);
 
 #define countof(x) (sizeof(x)/sizeof(x[0]))
@@ -115,13 +118,14 @@ typedef struct {
   int socketFD;
   char buffer[4096];
   int bufferIndex;
-} status_connection_t;
+} dashboard_connection_t;
 
 typedef struct {
   int serverFD;
-  int statusFD;
+  int dashboardFD;
   client_connection_t clients[ROIDSERVER_MAX_CLIENTS];
-  status_connection_t status[ROIDSERVER_MAX_CLIENTS];
+  dashboard_connection_t dashboard[ROIDSERVER_MAX_CLIENTS];
+  char password[256];
 } global_t;
 
 
@@ -131,11 +135,27 @@ static const int ONE = 1;
 struct Library *SocketBase = 0;
 #endif
 
-
 #ifdef ROID_NEED_SAFE_STRING_FILLS
 
+#ifndef _WIN32
 static int
-_strlcpy(char * dest, char * src, int max) {
+strnlen(const char *s, size_t max)
+{
+  int len;
+
+  for (len = 0; len < max; len++, s++) {
+    if (!*s) {
+      break;
+    }
+  }
+
+  return len;
+}
+#endif
+
+static int
+_strlcpy(char* dest, char* src, int max)
+{
   int len = strlen(src);
   if (len + 1 < max) {
     memcpy(dest, src, len + 1);
@@ -164,7 +184,7 @@ _strnlen(char *s, size_t max)
 
 
 static int
-_strlcat(char * dest, char * src, int maxlen)
+_strlcat(char *dest, char *src, int maxlen)
 {
   int srcLen = strlen(src);
   int destLen = _strnlen(dest, maxlen);
@@ -205,10 +225,10 @@ network_assertValidClient(int index)
 
 
 static void
-network_assertValidStatus(int index)
+network_assertValidDashboard(int index)
 {
   if (index < 0 || index >= (int)countof(global.clients)) {
-    log_printf("network_assertValidStatus: invalid status: %d\n", index);
+    log_printf("network_assertValidDashboard: invalid dashboard: %d\n", index);
     network_exit(5);
   }
 }
@@ -291,11 +311,11 @@ network_removeConnection(int index)
 
 
 static void
-network_removeStatusConnection(int index)
+network_removeDashboardConnection(int index)
 {
-  network_assertValidStatus(index);
-  network_closeSocket(global.status[index].socketFD);
-  global.status[index].socketFD = -1;
+  network_assertValidDashboard(index);
+  network_closeSocket(global.dashboard[index].socketFD);
+  global.dashboard[index].socketFD = -1;
 }
 
 
@@ -481,12 +501,12 @@ network_numClientConnections(void)
 
 
 static int
-network_numStatusConnections(void)
+network_numDashboardConnections(void)
 {
   int total = 0;
   unsigned int i;
-  for (i = 0; i < countof(global.status); i++) {
-    if (global.status[i].socketFD >= 0) {
+  for (i = 0; i < countof(global.dashboard); i++) {
+    if (global.dashboard[i].socketFD >= 0) {
       total++;
     }
   }
@@ -495,12 +515,12 @@ network_numStatusConnections(void)
 
 
 static const char*
-html_renderStatusHTML(void)
+html_renderDashboardHTML(void)
 {
   static char line[255];
   static char buffer[32768];
 
-  snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Status</div><table><thead><tr><th>Client Connections</th><th>Status Connections</th><th>Current Time</th></tr></thead><tr><td>%d</td><td>%d</td><td id=\"time\"></td></tr></table></div>", network_numClientConnections(), network_numStatusConnections());
+  snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Overview</div><table><thead><tr><th>Client Connections</th><th>Dashboard Connections</th><th>Current Time</th></tr></thead><tr><td>%d</td><td>%d</td><td id=\"time\"></td></tr></table></div>", network_numClientConnections(), network_numDashboardConnections());
 
   if (network_numClientConnections()) {
     snprintf(line, sizeof(line), "<div class=\"container\"><div class=\"titlebar\">Clients</div><table><thead><tr><th>Slot</th><th>Remote IP</th><th>State</th><th>Game ID</th><th>Sent</th><th>Recv'd</th><th>Lag</th><th>Connected</th></tr></thead></div>");
@@ -523,18 +543,18 @@ html_renderStatusHTML(void)
 
 
 static int
-network_sendStatus(int statusIndex, void* data, int len)
+network_sendDashboard(int dashboardIndex, void* data, int len)
 {
-  network_assertValidStatus(statusIndex);
+  network_assertValidDashboard(dashboardIndex);
 
   int done = 0;
   int sent = 0;
   int totalSent = 0;
 
   while (!done) {
-    if ((sent = send(global.status[statusIndex].socketFD, (void*)(((char*)data)+totalSent), len-totalSent, MSG_DONTWAIT)) != len) {
+    if ((sent = send(global.dashboard[dashboardIndex].socketFD, (void*)(((char*)data)+totalSent), len-totalSent, MSG_DONTWAIT)) != len) {
       if (errno != EAGAIN) {
-	network_removeStatusConnection(statusIndex);
+	network_removeDashboardConnection(dashboardIndex);
 	done = 1;
 	return 0;
       } else {
@@ -549,12 +569,12 @@ network_sendStatus(int statusIndex, void* data, int len)
 
 
 static void
-http_sendResponse(int statusIndex, int status, const char* desc, const char* contentType, int cacheSeconds, const char* data, int length)
+http_sendResponse(int dashboardIndex, int statusCode, const char* statusMessage, const char* contentType, int cacheSeconds, const char* data, int length)
 {
-  network_assertValidStatus(statusIndex);
+  network_assertValidDashboard(dashboardIndex);
 
   static char header[512];
-  snprintf(header, sizeof(header),  "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nConnection: keep-alive\r\nContent-Length: %d", status, desc, contentType, length);
+  snprintf(header, sizeof(header),  "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nConnection: keep-alive\r\nContent-Length: %d", statusCode, statusMessage, contentType, length);
   if (cacheSeconds) {
     strlcat(header, "\r\nCache-Control: max-age=", sizeof(header));
     static char seconds[20];
@@ -562,18 +582,18 @@ http_sendResponse(int statusIndex, int status, const char* desc, const char* con
     strlcat(header, seconds, sizeof(header));
   }
   strlcat(header, "\r\n\r\n", sizeof(header));
-  const int len = strlen(header);
-  if (network_sendStatus(statusIndex, header, len) != len) {
+  const int len = strnlen(header, sizeof(header));
+  if (network_sendDashboard(dashboardIndex, header, len) != len) {
     return;
   }
-  network_sendStatus(statusIndex, (void*)data, length);
+  network_sendDashboard(dashboardIndex, (void*)data, length);
 }
 
 
 static int
 http_sendFile(int i, const char* filename, const char* contentType, int cacheSeconds)
 {
-  network_assertValidStatus(i);
+  network_assertValidDashboard(i);
   int found = 0;
 
   struct stat st;
@@ -598,26 +618,68 @@ http_sendFile(int i, const char* filename, const char* contentType, int cacheSec
 }
 
 
+static int
+http_send(int i, const char* (*renderer)(void), const char* contentType, int cacheSeconds)
+{
+  if (renderer) {
+    const char* buffer = renderer();
+    http_sendResponse(i, 200, "OK", contentType, cacheSeconds, buffer, strlen(buffer));
+    return 1;
+  }
+
+  return 0;
+}
+
+
+#define http_find(a, b) _http_find(a, b, sizeof(a), sizeof(b))
+static char *
+_http_find(const char *haystack, const char *needle, int haystackLen, int needleLen)
+{
+  char n, h;
+
+  if ((n = *needle++) != '\0') {
+    int len = strnlen(needle, needleLen);
+    do {
+      do {
+	if ((h = *haystack++) == '\0' || haystackLen-- < 1)
+	  return (NULL);
+      } while (h != n);
+      if (len > haystackLen)
+	return (NULL);
+    } while (strncmp(haystack, needle, len) != 0);
+    haystack--;
+  }
+  return ((char *)haystack);
+}
+
+
+static char*
+http_matchPath(int dashboardIndex, const char* url)
+{
+  static char buffer[1024];
+  snprintf(buffer, sizeof(buffer), "GET /%s/%s", global.password, url);
+  return http_find(global.dashboard[dashboardIndex].buffer, buffer);
+}
+
+
 static void
 http_processRequest(int i)
 {
-  network_assertValidStatus(i);
+  network_assertValidDashboard(i);
 
   int found = 0;
-  if (strstr(global.status[i].buffer, "GET /9000 ") != NULL) {
-    found = http_sendFile(i, "roid.html", "text/html", 10000);
-  } else if (strstr(global.status[i].buffer, "GET /status") != NULL) {
-    const char* buffer = html_renderStatusHTML();
-    http_sendResponse(i, 200, "OK", "text/html", 0, buffer, strlen(buffer));
-    found = 1;
-  } else if (strstr(global.status[i].buffer, "GET /roid.css") != NULL) {
+  if (http_matchPath(i, "status") != NULL) {
+    found = http_send(i, html_renderDashboardHTML, "text/html", 0);
+  } else if (http_matchPath(i, "roid.css") != NULL) {
     found = http_sendFile(i, "roid.css", "text/css", 10000);
-  } else if (strstr(global.status[i].buffer, "GET /favicon.ico") != NULL) {
+  } else if (http_find(global.dashboard[i].buffer, "GET /favicon.ico") != NULL) {
     found = http_sendFile(i, "roid.ico", "image/vnd.microsoft.icon", 10000);
-  } else if (strstr(global.status[i].buffer, "GET /Sans.ttf") != NULL) {
+  } else if (http_matchPath(i, "Sans.ttf") != NULL) {
     found = http_sendFile(i, "Sans.ttf", "font/ttf", 10000);
-  } else if (strstr(global.status[i].buffer, "GET /exit") != NULL) {
-    //    network_exit(0);
+  } else if (http_matchPath(i, "exit") != NULL) {
+    network_exit(0);
+  } else if (http_matchPath(i, "dashboard") != NULL) {
+    found = http_sendFile(i, "roid.html", "text/html", 10000);
   }
 
   if (!found) {
@@ -629,32 +691,32 @@ http_processRequest(int i)
 static void
 http_processRequests(int i)
 {
-  network_assertValidStatus(i);
+  network_assertValidDashboard(i);
 
-  char* ptr = strstr(global.status[i].buffer, "\n\n");
+  char* ptr = http_find(global.dashboard[i].buffer, "\n\n");
 
   if (ptr != NULL) { /* end of request */
     http_processRequest(i);
     ptr += strlen("\n\n");
-    char* end = &global.status[i].buffer[global.status[i].bufferIndex];
-    char* dest = global.status[i].buffer;
-    global.status[i].bufferIndex -= (ptr - global.status[i].buffer);
+    char* end = &global.dashboard[i].buffer[global.dashboard[i].bufferIndex];
+    char* dest = global.dashboard[i].buffer;
+    global.dashboard[i].bufferIndex -= (ptr - global.dashboard[i].buffer);
     if (ptr < end) {
       *dest = *ptr;
       dest++, ptr++;
     }
-    global.status[i].buffer[global.status[i].bufferIndex] = 0;
+    global.dashboard[i].buffer[global.dashboard[i].bufferIndex] = 0;
   }
 }
 
 
 static void
-network_sendStatusData(void)
+network_sendDashboardData(void)
 {
   unsigned int i;
-  for (i = 0; i < countof(global.status); i++) {
-    if (global.status[i].socketFD >= 0) {
-      while (strstr(global.status[i].buffer, "\n\n") != NULL) { /* end of request */
+  for (i = 0; i < countof(global.dashboard); i++) {
+    if (global.dashboard[i].socketFD >= 0) {
+      while (http_find(global.dashboard[i].buffer, "\n\n") != NULL) { /* end of request */
 	http_processRequests(i);
       }
     }
@@ -675,10 +737,14 @@ network_processClientData(fd_set *read_fds)
 	  global.clients[i].recv++;
 	  if (global.clients[i].bufferIndex < (int)(countof(global.clients[i].buffer)-1)) {
 	    global.clients[i].bufferIndex++;
+	  } else {
+	    log_printf("network_processClientData: failed: buffer exhausted\n");
+	    network_removeConnection(i);
+	    done = 1;
 	  }
 	} else {
 	  if (len == 0) {
-	    log_printf("network_processClientData: failed %s\n", log_getError());
+	    log_printf("network_processClientData: failed: %s\n", log_getError());
 	    network_removeConnection(i);
 	  }
 	  done = 1;
@@ -690,23 +756,23 @@ network_processClientData(fd_set *read_fds)
 
 
 static void
-network_processStatusData(fd_set *read_fds)
+network_processDashboardData(fd_set *read_fds)
 {
   unsigned int i;
-  for (i = 0; i < countof(global.status); i++) {
-    if (global.status[i].socketFD >= 0 &&( FD_ISSET(global.status[i].socketFD, read_fds))) {
+  for (i = 0; i < countof(global.dashboard); i++) {
+    if (global.dashboard[i].socketFD >= 0 &&( FD_ISSET(global.dashboard[i].socketFD, read_fds))) {
       int done = 0;
       do {
-	int len = recv(global.status[i].socketFD, &global.status[i].buffer[global.status[i].bufferIndex], 1, MSG_DONTWAIT);
+	int len = recv(global.dashboard[i].socketFD, &global.dashboard[i].buffer[global.dashboard[i].bufferIndex], 1, MSG_DONTWAIT);
 	if (len > 0) {
-	  if (global.status[i].buffer[global.status[i].bufferIndex] != '\r') {
-	    if (global.status[i].bufferIndex < (int)(countof(global.status[i].buffer)-1)) {
-	      global.status[i].bufferIndex++;
+	  if (global.dashboard[i].buffer[global.dashboard[i].bufferIndex] != '\r') {
+	    if (global.dashboard[i].bufferIndex < (int)(countof(global.dashboard[i].buffer)-1)) {
+	      global.dashboard[i].bufferIndex++;
 	    }
 	  }
 	} else {
 	  if (len == 0) {
-	    network_removeStatusConnection(i);
+	    network_removeDashboardConnection(i);
 	  }
 	  done = 1;
 	}
@@ -722,9 +788,9 @@ network_setupFDS(fd_set *read_fds)
   FD_ZERO(read_fds);
 
   FD_SET(global.serverFD, read_fds);
-  FD_SET(global.statusFD, read_fds);
+  FD_SET(global.dashboardFD, read_fds);
 
-  int maxFD = max(global.serverFD, global.statusFD);
+  int maxFD = max(global.serverFD, global.dashboardFD);
 
   unsigned int i;
   for (i = 0; i < countof(global.clients); i++) {
@@ -736,12 +802,12 @@ network_setupFDS(fd_set *read_fds)
     }
   }
 
-  for (i = 0; i < countof(global.status); i++) {
-    if (global.status[i].socketFD >= 0) {
-      if (global.status[i].socketFD > maxFD) {
-	maxFD = global.status[i].socketFD;
+  for (i = 0; i < countof(global.dashboard); i++) {
+    if (global.dashboard[i].socketFD >= 0) {
+      if (global.dashboard[i].socketFD > maxFD) {
+	maxFD = global.dashboard[i].socketFD;
       }
-      FD_SET(global.status[i].socketFD, read_fds);
+      FD_SET(global.dashboard[i].socketFD, read_fds);
     }
   }
 
@@ -778,20 +844,56 @@ network_addConnection(int socketFD)
 
 
 static void
-network_addStatus(int socketFD)
+network_addDashboardConnection(int socketFD)
 {
   unsigned int i;
-  for (i = 0; i < countof(global.status); i++) {
-    if (global.status[i].socketFD < 0) {
-      global.status[i].socketFD = socketFD;
-      global.status[i].bufferIndex = 0;
-      log_printf("network_addStatus: new status slot: %d fd: %d\n", i, socketFD);
+  for (i = 0; i < countof(global.dashboard); i++) {
+    if (global.dashboard[i].socketFD < 0) {
+      global.dashboard[i].socketFD = socketFD;
+      global.dashboard[i].bufferIndex = 0;
+      global.dashboard[i].buffer[global.dashboard[i].bufferIndex] = 0;
+      log_printf("network_addDashboardConnection: new dashboard slot: %d fd: %d\n", i, socketFD);
       return;
     }
   }
 
   network_closeSocket(socketFD);
-  log_printf("network_addStatus: no free slots\n");
+  log_printf("network_addDashboardConnection: no free slots\n");
+}
+
+
+int
+main_loadPassword(void)
+{
+  FILE* fp = fopen("password.txt", "r");
+  int success = 0;
+
+  memset(global.password, 0, sizeof(global.password));
+
+  if (fp) {
+    if (fread(global.password, 1, sizeof(global.password)-1, fp) > 0) {
+      success = 1;
+    }
+    fclose(fp);
+  } else {
+    log_printf("main_loadPassword: failed to open password.txt: %s\n", log_getError());
+  }
+
+  unsigned i;
+  for (i = 0; i < sizeof(global.password); i++) {
+    if (!global.password[i]) {
+      break;
+    }
+    if (global.password[i] == '\n') {
+      global.password[i] = 0;
+    }
+
+    if (global.password[i] == '\r') {
+      global.password[i] = 0;
+    }
+  }
+
+  return success;
 }
 
 
@@ -800,6 +902,11 @@ main(int argc, char** argv)
 {
   (void)argc;
   (void)argv;
+
+  if (!main_loadPassword()) {
+    log_printf("main: failed to load password\n");
+    return 1;
+  }
 
 #ifdef AMIGA
   SocketBase = OpenLibrary((APTR)"bsdsocket.library", 4);
@@ -814,14 +921,14 @@ main(int argc, char** argv)
 #endif
 
   unsigned int i;
-  for (i = 0; i < countof(global.status); i++) {
-    global.status[i].socketFD = -1;
+  for (i = 0; i < countof(global.dashboard); i++) {
+    global.dashboard[i].socketFD = -1;
   }
 
-  global.serverFD = network_serverTCP(9000);
-  global.statusFD = network_serverTCP(9001);
+  global.serverFD = network_serverTCP(ROIDSERVER_GAME_PORT);
+  global.dashboardFD = network_serverTCP(ROIDSERVER_DASHBOARD_PORT);
 
-  if (global.serverFD < 0 || global.statusFD < 0) {
+  if (global.serverFD < 0 || global.dashboardFD < 0) {
     network_exit(2);
   }
 
@@ -854,20 +961,20 @@ main(int argc, char** argv)
 	}
       }
 
-      if (FD_ISSET(global.statusFD, &read_fds)) {
-	int clientFD = network_accept(global.statusFD);
+      if (FD_ISSET(global.dashboardFD, &read_fds)) {
+	int clientFD = network_accept(global.dashboardFD);
 	if (clientFD < 0) {
 	  log_printf("main: network_accept failed: %s\n", log_getError());
 	} else {
-	  network_addStatus(clientFD);
+	  network_addDashboardConnection(clientFD);
 	}
       }
 
 
       network_processClientData(&read_fds);
-      network_processStatusData(&read_fds);
+      network_processDashboardData(&read_fds);
       network_sendClientData();
-      network_sendStatusData();
+      network_sendDashboardData();
     }
   } while (1);
 
