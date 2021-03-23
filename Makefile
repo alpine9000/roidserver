@@ -2,11 +2,11 @@ SRCS=roidserver.c
 HEADERS=
 COMMON_DEPS=Makefile
 
-DEBUG_CFLAGS=-g $(STATIC_ANALYZE)
+DEBUG_CFLAGS=#-g $(STATIC_ANALYZE)
 WARNINGS=-Wno-error=format -Wno-format -Wall -Werror -Wall -Wpedantic -Wno-unknown-attributes -Wno-ignored-optimization-argument -Wno-unknown-pragmas  -Wmissing-field-initializers -Wfatal-errors -Wextra -Wshadow -Wuninitialized  -Wundef -Wbad-function-cast -Wparentheses -Wnull-dereference -pedantic-errors
 
 OBJS=$(addprefix build/obj/, $(SRCS:.c=.o))
-CFLAGS=$(WARNINGS) $(DEBUG_CFLAGS)
+CFLAGS=-O2 $(WARNINGS) $(DEBUG_CFLAGS)
 
 STATIC_ANALYZE=-g -fsanitize=address -fsanitize=undefined
 
@@ -17,7 +17,8 @@ WIN32_LIBS=-lws2_32
 
 AMIGA_OBJS=$(addprefix build/amiga/, $(SRCS:.c=.o))
 AMIGA_CC=/usr/local/amiga/bebbo/bin/m68k-amigaos-gcc
-AMIGA_CFLAGS=-DAMIGA -noixemul -fomit-frame-pointer
+AMIGA_CFLAGS=-O2 -DAMIGA -noixemul -fomit-frame-pointer
+AMIGA_LDFLAGS=-s
 AMIGA_LIBS=-lamiga
 
 build/roid.d:

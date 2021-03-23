@@ -1,11 +1,16 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
   <head>
     <title>Roidserver Dashboard</title>
+    <meta charset="UTF-8">
     <link rel="stylesheet" type="text/css" href="roid.css">
+    <script id="server-control-template" type="template/html">
+       <div><button id="reset">Reset</button><button id="reload">Reload</button><button id="exit">Shutdown</button></div>
+    </script>
   </head>
   <body>
     <h1>Roidserver Dashboard</h1>
-    <div class="controls"><button id="reset">Reset</button><button id="reload">Reload</button><button id="exit">Shutdown</button></div>
+
     <div id="status"></div>
   </body>
   <script type="text/javascript">
@@ -46,24 +51,46 @@
 	fetch('disconnect/' + clientId, fetchOpts);
     }
 
+    function ban()
+    {
+	var clientId = this.getAttribute("clientid");
+	console.log("BANNING: " + clientId);
+    }
+
+    function addButton(element, name, functor)
+    {
+	var id = element.parentElement.getAttribute("clientid");
+	element.insertAdjacentHTML('beforeend', "<button id=\""+name+id+"\" clientid='"+id+"''>"+name+"</button>");
+	element.querySelector("#"+name+id).onclick = functor;
+    }
+
     function updateStatus()
     {
 	fetch('status', fetchOpts).then(function (response) {
 	    return response.text();
 	}).then(function (body) {
 	    document.getElementById("status").innerHTML = body;
-	    var x = document.getElementsByClassName("time");
+	    var l = document.getElementsByClassName("time");
 	    var i;
-	    for (i = 0; i < x.length; i++) {
-		x[i].innerText = format_time(parseInt(x[i].innerText));
+	    for (i = 0; i < l.length; i++) {
+		l[i].innerText = format_time(parseInt(l[i].innerText));
 	    }
 
-	    var l = document.getElementsByClassName("disconnect");
+	    l = document.getElementsByClassName("disconnect");
 	    for (i = 0; i < l.length; i++) {
 		l[i].onclick = disconnect;
 	    }
 
-	    var e = document.getElementById("time");
+	    l = document.getElementsByClassName("client-controls");
+	    for (i = 0; i < l.length; i++) {
+		addButton(l[i], "Disconnect", disconnect);
+		addButton(l[i], "Ban", ban);
+	    }
+
+	    var e = document.getElementById("server-control-template");
+	    document.getElementById("server-controls").insertAdjacentHTML('afterbegin', e.innerText);
+
+	    e = document.getElementById("time");
 	    if (e != null) {
 		e.innerText = format_time(Date.now()/1000);
 	    }

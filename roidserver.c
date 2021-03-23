@@ -53,15 +53,15 @@
 #define log_getError() strerror(errno)
 #endif
 
-#ifdef _WIN32
 
 int
-inet_aton(const char *cp, struct in_addr *addr)
+_inet_aton(const char *cp, struct in_addr *addr)
 {
-  addr->s_addr = inet_addr(cp);
+  addr->s_addr = inet_addr((char*)cp);
   return (addr->s_addr == INADDR_NONE) ? 0 : 1;
 }
 
+#ifdef _WIN32
 const char*
 _w32_getError(void)
 {
@@ -583,11 +583,10 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
 	listSize = listSize ? listSize*2 : 16;
 	list->entries = realloc(list->entries, sizeof(list->entries[0])*listSize);
       }
-      printf("%lx: %d\n", (size_t)list->entries, list->num);
       if (mask != NULL) {
 	mask++;
 	struct in_addr addr;
-	if (inet_aton(mask, &addr) == 1) {
+	if (_inet_aton(mask, &addr) == 1) {
 	  list->entries[list->num].mask = htonl(addr.s_addr);
 	} else {
 	  log_printf("main_loadAllowDenyList(%s): failed to parse mask: %s\n", filename, mask);
@@ -615,7 +614,6 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
 static const char*
 html_renderDisconnectHTML(unsigned int dashboardIndex)
 {
-  printf("html_renderDisconnectHTML: %d\n", dashboardIndex);
   static char* result = "OK";
   char* ptr = http_find(global.dashboard[dashboardIndex].buffer, "disconnect/");
 
@@ -644,6 +642,12 @@ html_renderReloadHTML(unsigned int dashboardIndex)
   if (!main_loadAllowDenyList(&global.denyList, "deny.txt")) {
     log_printf("main: WARNING: failed to load deny list\n");
   }
+
+  unsigned int i;
+  for (i = 0; i < countof(global.dashboard); i++) {
+    network_removeDashboardConnection(i);
+  }
+
   return buffer;
 }
 
@@ -672,7 +676,7 @@ html_renderDashboardHTML(unsigned int dashboardIndex)
   static char line[255];
   static char buffer[32768];
 
-  snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Overview</div><table><thead><tr><th>Connected Fighters</th><th>Dashboard Connections</th><th>Current Time</th></tr></thead><tr><td>%d</td><td>%d</td><td id=\"time\"></td></tr></table></div>", network_numClientConnections(), network_numDashboardConnections());
+  snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Server Overview</div><table><thead><tr><th>Connected Fighters</th><th>Dashboard Connections</th><th>Current Time</th><th></th></tr></thead><tr><td>%d</td><td>%d</td><td id=\"time\"></td><td id=\"server-controls\"></td></tr></table></div>", network_numClientConnections(), network_numDashboardConnections());
 
   if (network_numClientConnections()) {
     snprintf(line, sizeof(line), "<div class=\"container\"><div class=\"titlebar\">Fighters</div><table><thead><tr><th>Slot</th><th>Remote IP</th><th>State</th><th>Game ID</th><th>Sent</th><th>Recv'd</th><th>Lag</th><th>Connected Since</th><th></th></tr></thead></div>");
@@ -682,7 +686,7 @@ html_renderDashboardHTML(unsigned int dashboardIndex)
     for (i = 0; i < countof(global.clients); i++) {
       if (global.clients[i].id) {
 
-	snprintf(line, sizeof(line), "<tr><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%d</td><td>%d</td><td class=\"time\">%ld</td><td><button class=\"disconnect\" clientid=\"%d\">Disconnect</button><button class=\"ban\" clientid=\"%d\">Ban</button></tr>\n", i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].sent, global.clients[i].recv, global.clients[i].lag, global.clients[i].connected, i, i);
+	snprintf(line, sizeof(line), "<tr clientid=\"%d\"><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%d</td><td>%d</td><td class=\"time\">%ld</td><td class=\"client-controls\"></td></tr>\n", i, i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].sent, global.clients[i].recv, global.clients[i].lag, global.clients[i].connected);
 	strlcat(buffer, line, sizeof(buffer));
       }
     }
@@ -791,6 +795,14 @@ http_matchPath(int dashboardIndex, const char* url)
   return http_find(global.dashboard[dashboardIndex].buffer, buffer);
 }
 
+static char*
+http_matchAbsPath(int dashboardIndex, const char* url)
+{
+  static char buffer[1024];
+  snprintf(buffer, sizeof(buffer), "GET /%s", url);
+  return http_find(global.dashboard[dashboardIndex].buffer, buffer);
+}
+
 
 static void
 http_processRequest(int i)
@@ -806,16 +818,16 @@ http_processRequest(int i)
     found = http_sendFile(i, "roid.css", "text/css", 10000);
   } else if (http_find(global.dashboard[i].buffer, "GET /favicon.ico") != NULL) {
     found = http_sendFile(i, "roid.ico", "image/vnd.microsoft.icon", 10000);
-  } else if (http_matchPath(i, "Sans.ttf") != NULL) {
+  } else if (http_matchAbsPath(i, "Sans.ttf") != NULL) {
     found = http_sendFile(i, "Sans.ttf", "font/ttf", 10000);
-  } else if (http_matchPath(i, "exit") != NULL) {
-    network_exit(0);
   } else if (http_matchPath(i, "reset") != NULL) {
     found = http_send(i, html_renderResetHTML, "text/html", 0, i);
   } else if (http_matchPath(i, "dashboard") != NULL) {
     found = http_sendFile(i, "roid.html", "text/html", 10000);
   } else if (http_matchPath(i, "disconnect") != NULL) {
     found = http_send(i, html_renderDisconnectHTML, "text/html", 0, i);
+  } else if (http_matchPath(i, "exit") != NULL) {
+    network_exit(0);
   }
 
   if (!found) {
@@ -1018,8 +1030,10 @@ network_addDashboardConnection(int socketFD)
 
   getpeername(socketFD, (struct sockaddr *)&addr, &addr_size);
 
+  printf("global.dashboardAllowList.num: %d\n", global.dashboardAllowList.num);
   for (i = 0; i < global.dashboardAllowList.num; i++) {
     if (network_matchAddr(global.dashboardAllowList.entries[i].addr, addr.sin_addr.s_addr, global.dashboardAllowList.entries[i].mask)) {
+      printf("allowed!\n");
       allowed = 1;
       break;
     }
