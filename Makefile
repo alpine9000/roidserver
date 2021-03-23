@@ -2,13 +2,13 @@ SRCS=roidserver.c
 HEADERS=
 COMMON_DEPS=Makefile
 
-DEBUG_CFLAGS=#-g $(STATIC_ANALYZE)
+STATIC_ANALYZE=-fsanitize=address -fsanitize=undefined
+DEBUG_CFLAGS=-g $(STATIC_ANALYZE)
 WARNINGS=-Wno-error=format -Wno-format -Wall -Werror -Wall -Wpedantic -Wno-unknown-attributes -Wno-ignored-optimization-argument -Wno-unknown-pragmas  -Wmissing-field-initializers -Wfatal-errors -Wextra -Wshadow -Wuninitialized  -Wundef -Wbad-function-cast -Wparentheses -Wnull-dereference -pedantic-errors
 
 OBJS=$(addprefix build/obj/, $(SRCS:.c=.o))
 CFLAGS=-O2 $(WARNINGS) $(DEBUG_CFLAGS)
 
-STATIC_ANALYZE=-g -fsanitize=address -fsanitize=undefined
 
 WIN32_OBJS=$(addprefix build/win32/, $(SRCS:.c=.o))
 WIN32_CC=/usr/local/mingw/bin/x86_64-w64-mingw32-gcc

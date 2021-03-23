@@ -35,6 +35,17 @@
 #define ROIDSERVER_NUM_PING_PACKETS 8
 #define ROIDSERVER_MAX_CLIENTS 16
 #define ROIDSERVER_READY_STATE (ROIDSERVER_NUM_PING_PACKETS+1)
+#define ROIDSERVER_HTTP_REQUEST_SEPARATOR "\r\n\r\n"
+//#define ROIDSERVER_ASSERTS
+//#define ROIDSERVER_MEASURE_TIME
+
+#ifdef ROIDSERVER_ASSERTS
+#define network_assertValidClient(x) _network_assertValidClient(x)
+#define network_assertValidDashboard(x) _network_assertValidDashboard(x)
+#else
+#define network_assertValidClient(x) (void)x
+#define	network_assertValidDashboard(x) (void)x
+#endif
 
 #ifndef max
 #define max(a, b) (a > b ? a : b)
@@ -237,8 +248,9 @@ network_exit(int error)
 }
 
 
+#ifdef ROIDSERVER_ASSERTS
 static void
-network_assertValidClient(int index)
+_network_assertValidClient(int index)
 {
   if (index < 0 || index >= (int)countof(global.clients)) {
     log_printf("network_assertValidClient: invalid client: %d\n", index);
@@ -248,14 +260,14 @@ network_assertValidClient(int index)
 
 
 static void
-network_assertValidDashboard(int index)
+_network_assertValidDashboard(int index)
 {
   if (index < 0 || index >= (int)countof(global.clients)) {
     log_printf("network_assertValidDashboard: invalid dashboard: %d\n", index);
     network_exit(5);
   }
 }
-
+#endif
 
 static void
 network_closeSocket(int fd)
@@ -614,6 +626,8 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
 static const char*
 html_renderDisconnectHTML(unsigned int dashboardIndex)
 {
+  network_assertValidDashboard(dashboardIndex);
+
   static char* result = "OK";
   char* ptr = http_find(global.dashboard[dashboardIndex].buffer, "disconnect/");
 
@@ -632,7 +646,8 @@ html_renderDisconnectHTML(unsigned int dashboardIndex)
 static const char*
 html_renderReloadHTML(unsigned int dashboardIndex)
 {
-  (void)dashboardIndex;
+  network_assertValidDashboard(dashboardIndex);
+
   static char* buffer = "OK";
 
   if (!main_loadAllowDenyList(&global.dashboardAllowList, "allow.txt")) {
@@ -655,7 +670,7 @@ html_renderReloadHTML(unsigned int dashboardIndex)
 static const char*
 html_renderResetHTML(unsigned int dashboardIndex)
 {
-  (void)dashboardIndex;
+  network_assertValidDashboard(dashboardIndex);
   static char* buffer = "OK";
 
   unsigned int i;
@@ -672,7 +687,7 @@ html_renderResetHTML(unsigned int dashboardIndex)
 static const char*
 html_renderDashboardHTML(unsigned int dashboardIndex)
 {
-  (void)dashboardIndex;
+  network_assertValidDashboard(dashboardIndex);
   static char line[255];
   static char buffer[32768];
 
@@ -737,7 +752,7 @@ http_sendResponse(int dashboardIndex, int statusCode, const char* statusMessage,
     snprintf(seconds, sizeof(seconds), "%d", cacheSeconds);
     strlcat(header, seconds, sizeof(header));
   }
-  strlcat(header, "\r\n\r\n", sizeof(header));
+  strlcat(header, ROIDSERVER_HTTP_REQUEST_SEPARATOR, sizeof(header));
   const int len = strnlen(header, sizeof(header));
   if (network_sendDashboard(dashboardIndex, header, len) != len) {
     return;
@@ -777,6 +792,9 @@ http_sendFile(int i, const char* filename, const char* contentType, int cacheSec
 static int
 http_send(int i, const char* (*renderer)(unsigned int), const char* contentType, int cacheSeconds, unsigned int dashboardIndex)
 {
+  network_assertValidClient(i);
+  network_assertValidDashboard(dashboardIndex);
+
   if (renderer) {
     const char* buffer = renderer(dashboardIndex);
     http_sendResponse(i, 200, "OK", contentType, cacheSeconds, buffer, strlen(buffer));
@@ -788,18 +806,12 @@ http_send(int i, const char* (*renderer)(unsigned int), const char* contentType,
 
 
 static char*
-http_matchPath(int dashboardIndex, const char* url)
+http_matchPath(int dashboardIndex, const char* path)
 {
-  static char buffer[1024];
-  snprintf(buffer, sizeof(buffer), "GET /%s/%s", global.rootPath, url);
-  return http_find(global.dashboard[dashboardIndex].buffer, buffer);
-}
+  network_assertValidDashboard(dashboardIndex);
 
-static char*
-http_matchAbsPath(int dashboardIndex, const char* url)
-{
   static char buffer[1024];
-  snprintf(buffer, sizeof(buffer), "GET /%s", url);
+  snprintf(buffer, sizeof(buffer), "GET /%s/%s", global.rootPath, path);
   return http_find(global.dashboard[dashboardIndex].buffer, buffer);
 }
 
@@ -818,7 +830,7 @@ http_processRequest(int i)
     found = http_sendFile(i, "roid.css", "text/css", 10000);
   } else if (http_find(global.dashboard[i].buffer, "GET /favicon.ico") != NULL) {
     found = http_sendFile(i, "roid.ico", "image/vnd.microsoft.icon", 10000);
-  } else if (http_matchAbsPath(i, "Sans.ttf") != NULL) {
+  } else if (http_find(global.dashboard[i].buffer, "GET /Sans.ttf") != NULL) {
     found = http_sendFile(i, "Sans.ttf", "font/ttf", 10000);
   } else if (http_matchPath(i, "reset") != NULL) {
     found = http_send(i, html_renderResetHTML, "text/html", 0, i);
@@ -837,30 +849,39 @@ http_processRequest(int i)
 
 
 static void
-http_processRequests(int i)
+http_processRequests(char* ptr, int i)
 {
   network_assertValidDashboard(i);
 
   global.dashboard[i].buffer[global.dashboard[i].bufferIndex] = 0;
-  char* ptr = _http_find(global.dashboard[i].buffer, "\n\n", global.dashboard[i].bufferIndex, sizeof("\n\n"));
 
-  if (ptr != NULL) { /* end of request */
-    http_processRequest(i);
-    ptr += strlen("\n\n");
-    char* end = &global.dashboard[i].buffer[global.dashboard[i].bufferIndex];
-    char* dest = global.dashboard[i].buffer;
-    global.dashboard[i].bufferIndex -= (ptr - global.dashboard[i].buffer);
-    if (global.dashboard[i].bufferIndex < 0) {
-      /* this should not be possible */
-      global.dashboard[i].bufferIndex = 0;
-    } else {
-      if (ptr < end) {
-	*dest = *ptr;
-	dest++, ptr++;
-      }
+  *ptr = 0;
+
+#ifdef ROIDSERVER_MEASURE_TIME
+  clock_t startTime, endTime;
+  startTime = clock();
+#endif
+
+  http_processRequest(i);
+  ptr += strlen(ROIDSERVER_HTTP_REQUEST_SEPARATOR);
+  char* end = &global.dashboard[i].buffer[global.dashboard[i].bufferIndex];
+  char* dest = global.dashboard[i].buffer;
+  global.dashboard[i].bufferIndex -= (ptr - global.dashboard[i].buffer);
+  if (global.dashboard[i].bufferIndex < 0) {
+    /* this should not be possible */
+    global.dashboard[i].bufferIndex = 0;
+  } else {
+    while (ptr < end) {
+      *dest++ = *ptr++;
     }
-    global.dashboard[i].buffer[global.dashboard[i].bufferIndex] = 0;
   }
+
+#ifdef ROIDSERVER_MEASURE_TIME
+  endTime = clock();
+  printf("%f\n", 1000.0 * ((double)(endTime-startTime) / (double)(CLOCKS_PER_SEC)));
+#endif
+
+  global.dashboard[i].buffer[global.dashboard[i].bufferIndex] = 0;
 }
 
 
@@ -870,8 +891,9 @@ network_sendDashboardData(void)
   unsigned int i;
   for (i = 0; i < countof(global.dashboard); i++) {
     if (global.dashboard[i].socketFD >= 0) {
-      while (http_find(global.dashboard[i].buffer, "\n\n") != NULL) { /* end of request */
-	http_processRequests(i);
+      char* ptr;
+      while ((ptr = http_find(global.dashboard[i].buffer, ROIDSERVER_HTTP_REQUEST_SEPARATOR)) != NULL) { /* end of request */
+	http_processRequests(ptr, i);
       }
     }
   }
@@ -883,7 +905,7 @@ network_processClientData(fd_set *read_fds)
 {
   unsigned int i;
   for (i = 0; i < countof(global.clients); i++) {
-    if (global.clients[i].id > 0 &&( FD_ISSET(global.clients[i].socketFD, read_fds))) {
+    if (global.clients[i].id > 0 && (FD_ISSET(global.clients[i].socketFD, read_fds))) {
       int done = 0;
       do {
 	int len = recv(global.clients[i].socketFD, &global.clients[i].buffer[global.clients[i].bufferIndex], 1, MSG_DONTWAIT);
@@ -917,12 +939,11 @@ network_processDashboardData(fd_set *read_fds)
     if (global.dashboard[i].socketFD >= 0 &&( FD_ISSET(global.dashboard[i].socketFD, read_fds))) {
       int done = 0;
       do {
-	int len = recv(global.dashboard[i].socketFD, &global.dashboard[i].buffer[global.dashboard[i].bufferIndex], 1, MSG_DONTWAIT);
+	int len = recv(global.dashboard[i].socketFD, &global.dashboard[i].buffer[global.dashboard[i].bufferIndex], sizeof(global.dashboard[i].buffer)-global.dashboard[i].bufferIndex, MSG_DONTWAIT);
 	if (len > 0) {
-	  if (global.dashboard[i].buffer[global.dashboard[i].bufferIndex] != '\r') {
-	    if (global.dashboard[i].bufferIndex < (int)(countof(global.dashboard[i].buffer)-1)) {
-	      global.dashboard[i].bufferIndex++;
-	    }
+	  global.dashboard[i].bufferIndex += len;
+	  if (global.dashboard[i].bufferIndex >= (int)(countof(global.dashboard[i].buffer)-1)) {
+	    global.dashboard[i].bufferIndex = countof(global.dashboard[i].buffer)-1;
 	  }
 	} else {
 	  if (len == 0) {
@@ -1033,7 +1054,6 @@ network_addDashboardConnection(int socketFD)
   printf("global.dashboardAllowList.num: %d\n", global.dashboardAllowList.num);
   for (i = 0; i < global.dashboardAllowList.num; i++) {
     if (network_matchAddr(global.dashboardAllowList.entries[i].addr, addr.sin_addr.s_addr, global.dashboardAllowList.entries[i].mask)) {
-      printf("allowed!\n");
       allowed = 1;
       break;
     }
