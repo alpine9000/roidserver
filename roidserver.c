@@ -30,11 +30,11 @@
 #define localtime_r(a, b) localtime(a)
 #endif
 
-#define ROIDSERVER_GAME_PORT 9000
-#define ROIDSERVER_DASHBOARD_PORT 9001
-#define ROIDSERVER_NUM_PING_PACKETS 8
-#define ROIDSERVER_MAX_CLIENTS 16
-#define ROIDSERVER_READY_STATE (ROIDSERVER_NUM_PING_PACKETS+1)
+#define ROIDSERVER_GAME_PORT              9000
+#define ROIDSERVER_DASHBOARD_PORT         9001
+#define ROIDSERVER_NUM_PING_PACKETS       8
+#define ROIDSERVER_MAX_CLIENTS            16
+#define ROIDSERVER_READY_STATE            (ROIDSERVER_NUM_PING_PACKETS+1)
 #define ROIDSERVER_HTTP_REQUEST_SEPARATOR "\r\n\r\n"
 //#define ROIDSERVER_ASSERTS
 //#define ROIDSERVER_MEASURE_TIME
@@ -71,6 +71,7 @@ _inet_aton(const char *cp, struct in_addr *addr)
   addr->s_addr = inet_addr((char*)cp);
   return (addr->s_addr == INADDR_NONE) ? 0 : 1;
 }
+
 
 #ifdef _WIN32
 const char*
@@ -138,7 +139,6 @@ typedef struct {
   char buffer[4096];
   int bufferIndex;
 } dashboard_connection_t;
-
 
 typedef struct {
   uint32_t addr;
@@ -1051,7 +1051,6 @@ network_addDashboardConnection(int socketFD)
 
   getpeername(socketFD, (struct sockaddr *)&addr, &addr_size);
 
-  printf("global.dashboardAllowList.num: %d\n", global.dashboardAllowList.num);
   for (i = 0; i < global.dashboardAllowList.num; i++) {
     if (network_matchAddr(global.dashboardAllowList.entries[i].addr, addr.sin_addr.s_addr, global.dashboardAllowList.entries[i].mask)) {
       allowed = 1;
