@@ -1,13 +1,21 @@
 <html>
   <head>
-    <title>Roidserver Status</title>
+    <title>Roidserver Dashboard</title>
     <link rel="stylesheet" type="text/css" href="roid.css">
   </head>
   <body>
     <h1>Roidserver Dashboard</h1>
+    <div class="controls"><button id="reset">Reset</button><button id="reload">Reload</button><button id="exit">Shutdown</button></div>
     <div id="status"></div>
   </body>
   <script type="text/javascript">
+
+    var fetchOpts = {
+	method: 'GET',
+	headers: {}
+    };
+
+
     function format_time(s) {
 	const dtFormat = new Intl.DateTimeFormat('en-GB', {
 	    dateStyle: 'short',
@@ -17,15 +25,30 @@
 	return dtFormat.format(new Date(s * 1e3));
     }
 
+    function reload()
+    {
+	fetch('reload', fetchOpts);
+    }
+
+    function exit()
+    {
+	fetch('exit', fetchOpts);
+    }
+
+    function reset()
+    {
+	fetch('reset', fetchOpts);
+    }
+
+    function disconnect()
+    {
+	var clientId = this.getAttribute("clientid");
+	fetch('disconnect/' + clientId, fetchOpts);
+    }
+
     function updateStatus()
     {
-	var opts = {
-	    method: 'GET',
-	    headers: {}
-	};
-
-
-	fetch('status', opts).then(function (response) {
+	fetch('status', fetchOpts).then(function (response) {
 	    return response.text();
 	}).then(function (body) {
 	    document.getElementById("status").innerHTML = body;
@@ -34,9 +57,30 @@
 	    for (i = 0; i < x.length; i++) {
 		x[i].innerText = format_time(parseInt(x[i].innerText));
 	    }
-	    var t = document.getElementById("time");
-	    if (t != null) {
-		t.innerText = format_time(Date.now()/1000);
+
+	    var l = document.getElementsByClassName("disconnect");
+	    for (i = 0; i < l.length; i++) {
+		l[i].onclick = disconnect;
+	    }
+
+	    var e = document.getElementById("time");
+	    if (e != null) {
+		e.innerText = format_time(Date.now()/1000);
+	    }
+
+	    e = document.getElementById("reload");
+	    if (e != null) {
+		e.onclick = reload;
+	    }
+
+	    e = document.getElementById("exit");
+	    if (e != null) {
+		e.onclick = exit;
+	    }
+
+	    e = document.getElementById("reset");
+	    if (e != null) {
+		e.onclick = reset;
 	    }
 	});
 

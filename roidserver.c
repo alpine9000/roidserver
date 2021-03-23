@@ -54,6 +54,14 @@
 #endif
 
 #ifdef _WIN32
+
+int
+inet_aton(const char *cp, struct in_addr *addr)
+{
+  addr->s_addr = inet_addr(cp);
+  return (addr->s_addr == INADDR_NONE) ? 0 : 1;
+}
+
 const char*
 _w32_getError(void)
 {
@@ -79,7 +87,7 @@ _w32_getError(void)
     time(&t);								\
     struct tm now;							\
     localtime_s(&now, &t);						\
-    printf("%02d:%02d:%02d : ", now.tm_hour, now.tm_min, now.tm_sec);	\
+    printf("%02d/%02d/%d %02d:%02d:%02d : ", now.tm_mday, now.tm_mon+1, 1900+now.tm_year, now.tm_hour, now.tm_min, now.tm_sec); \
   } while (0);
 #else
 #define log_printNow() do {						\
@@ -88,7 +96,7 @@ _w32_getError(void)
     struct tm *l;							\
     struct tm now;							\
     l = localtime_r(&t, &now);						\
-    printf("%02d:%02d:%02d : ", l->tm_hour, l->tm_min, l->tm_sec);	\
+    printf("%02d/%02d/%d %02d:%02d:%02d : ", l->tm_mday, l->tm_mon+1, 1900+l->tm_year, l->tm_hour, l->tm_min, l->tm_sec); \
   } while(0);
 #endif
 
@@ -120,12 +128,27 @@ typedef struct {
   int bufferIndex;
 } dashboard_connection_t;
 
+
+typedef struct {
+  uint32_t addr;
+  uint32_t mask;
+} allowdeny_addr_t;
+
+typedef struct {
+  allowdeny_addr_t* entries;
+  unsigned int num;
+} allowdeny_list_t;
+
 typedef struct {
   int serverFD;
   int dashboardFD;
   client_connection_t clients[ROIDSERVER_MAX_CLIENTS];
   dashboard_connection_t dashboard[ROIDSERVER_MAX_CLIENTS];
-  char password[256];
+  char rootPath[256];
+
+  allowdeny_list_t dashboardAllowList;
+  allowdeny_list_t denyList;
+
 } global_t;
 
 
@@ -300,12 +323,17 @@ network_removeConnection(int index)
   network_assertValidClient(index);
   uint32_t id = global.clients[index].id;
   unsigned int i;
-  for (i = 0; i < countof(global.clients); i++) {
-    if (id == global.clients[i].id) {
-      log_printf("network_processClientData: removing connection slot: %d\n", i);
-      network_closeSocket(global.clients[i].socketFD);
-      global.clients[i].id = 0;
+  if (id != 0) {
+    for (i = 0; i < countof(global.clients); i++) {
+      if (id == global.clients[i].id) {
+	log_printf("network_processClientData: removing connection slot: %d\n", i);
+	network_closeSocket(global.clients[i].socketFD);
+	global.clients[i].id = 0;
+      }
     }
+  } else {
+    log_printf("network_processClientData: removing connection slot: %d\n", index);
+    network_closeSocket(global.clients[index].socketFD);
   }
 }
 
@@ -514,23 +542,147 @@ network_numDashboardConnections(void)
 }
 
 
-static const char*
-html_renderDashboardHTML(void)
+#define http_find(a, b) _http_find(a, b, sizeof(a), sizeof(b))
+static char *
+_http_find(const char *haystack, const char *needle, int haystackLen, int needleLen)
 {
+  char n, h;
+
+  if ((n = *needle++) != '\0') {
+    int len = strnlen(needle, needleLen);
+    do {
+      do {
+	if ((h = *haystack++) == '\0' || haystackLen-- < 1)
+	  return (NULL);
+      } while (h != n);
+      if (len > haystackLen)
+	return (NULL);
+    } while (strncmp(haystack, needle, len) != 0);
+    haystack--;
+  }
+  return ((char *)haystack);
+}
+
+
+static int
+main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
+{
+  FILE* fp = fopen(filename, "r");
+  static char line[256];
+  char* ptr;
+  unsigned int listSize = 0;
+
+  list->num = 0;
+  list->entries = 0;
+
+  if (fp) {
+    while ((ptr = fgets(line, sizeof(line), fp))) {
+      line[strcspn(line, "\n")] = 0;
+      char* mask = _http_find(line, "/", sizeof(line), sizeof("/"));
+      if (listSize <= list->num) {
+	listSize = listSize ? listSize*2 : 16;
+	list->entries = realloc(list->entries, sizeof(list->entries[0])*listSize);
+      }
+      printf("%lx: %d\n", (size_t)list->entries, list->num);
+      if (mask != NULL) {
+	mask++;
+	struct in_addr addr;
+	if (inet_aton(mask, &addr) == 1) {
+	  list->entries[list->num].mask = htonl(addr.s_addr);
+	} else {
+	  log_printf("main_loadAllowDenyList(%s): failed to parse mask: %s\n", filename, mask);
+	  list->entries[list->num].mask = 0;
+	}
+	line[strcspn(line, "/")] = 0;
+	list->entries[list->num].addr = inet_addr(line);
+      } else {
+	list->entries[list->num].mask = 0xFFFFFFFF;
+	list->entries[list->num].addr = inet_addr(line);
+      }
+      log_printf("main_loadAllowDenyList(%s): adding %s -> %x mask(%x)\n", filename, line, (uint32_t)list->entries[list->num].addr, list->entries[list->num].mask);
+      list->num++;
+    }
+
+    fclose(fp);
+  } else {
+    log_printf("main_loadAllowDenyList(%s): failed to open %s\n", filename, log_getError());
+  }
+
+  return list->num > 0;
+}
+
+
+static const char*
+html_renderDisconnectHTML(unsigned int dashboardIndex)
+{
+  printf("html_renderDisconnectHTML: %d\n", dashboardIndex);
+  static char* result = "OK";
+  char* ptr = http_find(global.dashboard[dashboardIndex].buffer, "disconnect/");
+
+  if (ptr) {
+    ptr += strlen("disconnect/");
+    int i;
+    if (sscanf(ptr, "%d", &i) == 1) {
+      network_removeConnection(i);
+    }
+  }
+
+  return result;
+}
+
+
+static const char*
+html_renderReloadHTML(unsigned int dashboardIndex)
+{
+  (void)dashboardIndex;
+  static char* buffer = "OK";
+
+  if (!main_loadAllowDenyList(&global.dashboardAllowList, "allow.txt")) {
+    log_printf("main: WARNING: failed to load allow list\n");
+  }
+
+  if (!main_loadAllowDenyList(&global.denyList, "deny.txt")) {
+    log_printf("main: WARNING: failed to load deny list\n");
+  }
+  return buffer;
+}
+
+
+static const char*
+html_renderResetHTML(unsigned int dashboardIndex)
+{
+  (void)dashboardIndex;
+  static char* buffer = "OK";
+
+  unsigned int i;
+  for (i = 0; i < countof(global.clients); i++) {
+    if (global.clients[i].id > 0) {
+      network_removeConnection(i);
+    }
+  }
+
+  return buffer;
+}
+
+
+static const char*
+html_renderDashboardHTML(unsigned int dashboardIndex)
+{
+  (void)dashboardIndex;
   static char line[255];
   static char buffer[32768];
 
-  snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Overview</div><table><thead><tr><th>Client Connections</th><th>Dashboard Connections</th><th>Current Time</th></tr></thead><tr><td>%d</td><td>%d</td><td id=\"time\"></td></tr></table></div>", network_numClientConnections(), network_numDashboardConnections());
+  snprintf(buffer, sizeof(buffer), "<div class=\"container\"><div class=\"titlebar\">Overview</div><table><thead><tr><th>Connected Fighters</th><th>Dashboard Connections</th><th>Current Time</th></tr></thead><tr><td>%d</td><td>%d</td><td id=\"time\"></td></tr></table></div>", network_numClientConnections(), network_numDashboardConnections());
 
   if (network_numClientConnections()) {
-    snprintf(line, sizeof(line), "<div class=\"container\"><div class=\"titlebar\">Clients</div><table><thead><tr><th>Slot</th><th>Remote IP</th><th>State</th><th>Game ID</th><th>Sent</th><th>Recv'd</th><th>Lag</th><th>Connected</th></tr></thead></div>");
+    snprintf(line, sizeof(line), "<div class=\"container\"><div class=\"titlebar\">Fighters</div><table><thead><tr><th>Slot</th><th>Remote IP</th><th>State</th><th>Game ID</th><th>Sent</th><th>Recv'd</th><th>Lag</th><th>Connected Since</th><th></th></tr></thead></div>");
     strlcat(buffer, line, sizeof(buffer));
 
     unsigned i;
     for (i = 0; i < countof(global.clients); i++) {
       if (global.clients[i].id) {
 
-	snprintf(line, sizeof(line), "<tr><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%d</td><td>%d</td><td class=\"time\">%ld</td></tr>\n", i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].sent, global.clients[i].recv, global.clients[i].lag, global.clients[i].connected);
+	snprintf(line, sizeof(line), "<tr><td>%d</td><td>%s</td><td>%d</td><td>%x</td><td>%d</td><td>%d</td><td>%d</td><td class=\"time\">%ld</td><td><button class=\"disconnect\" clientid=\"%d\">Disconnect</button><button class=\"ban\" clientid=\"%d\">Ban</button></tr>\n", i, global.clients[i].ip, global.clients[i].state, global.clients[i].id, global.clients[i].sent, global.clients[i].recv, global.clients[i].lag, global.clients[i].connected, i, i);
 	strlcat(buffer, line, sizeof(buffer));
       }
     }
@@ -619,10 +771,10 @@ http_sendFile(int i, const char* filename, const char* contentType, int cacheSec
 
 
 static int
-http_send(int i, const char* (*renderer)(void), const char* contentType, int cacheSeconds)
+http_send(int i, const char* (*renderer)(unsigned int), const char* contentType, int cacheSeconds, unsigned int dashboardIndex)
 {
   if (renderer) {
-    const char* buffer = renderer();
+    const char* buffer = renderer(dashboardIndex);
     http_sendResponse(i, 200, "OK", contentType, cacheSeconds, buffer, strlen(buffer));
     return 1;
   }
@@ -631,33 +783,11 @@ http_send(int i, const char* (*renderer)(void), const char* contentType, int cac
 }
 
 
-#define http_find(a, b) _http_find(a, b, sizeof(a), sizeof(b))
-static char *
-_http_find(const char *haystack, const char *needle, int haystackLen, int needleLen)
-{
-  char n, h;
-
-  if ((n = *needle++) != '\0') {
-    int len = strnlen(needle, needleLen);
-    do {
-      do {
-	if ((h = *haystack++) == '\0' || haystackLen-- < 1)
-	  return (NULL);
-      } while (h != n);
-      if (len > haystackLen)
-	return (NULL);
-    } while (strncmp(haystack, needle, len) != 0);
-    haystack--;
-  }
-  return ((char *)haystack);
-}
-
-
 static char*
 http_matchPath(int dashboardIndex, const char* url)
 {
   static char buffer[1024];
-  snprintf(buffer, sizeof(buffer), "GET /%s/%s", global.password, url);
+  snprintf(buffer, sizeof(buffer), "GET /%s/%s", global.rootPath, url);
   return http_find(global.dashboard[dashboardIndex].buffer, buffer);
 }
 
@@ -669,7 +799,9 @@ http_processRequest(int i)
 
   int found = 0;
   if (http_matchPath(i, "status") != NULL) {
-    found = http_send(i, html_renderDashboardHTML, "text/html", 0);
+    found = http_send(i, html_renderDashboardHTML, "text/html", 0, i);
+  } else if (http_matchPath(i, "reload") != NULL) {
+    found = http_send(i, html_renderReloadHTML, "text/html", 0, i);
   } else if (http_matchPath(i, "roid.css") != NULL) {
     found = http_sendFile(i, "roid.css", "text/css", 10000);
   } else if (http_find(global.dashboard[i].buffer, "GET /favicon.ico") != NULL) {
@@ -678,8 +810,12 @@ http_processRequest(int i)
     found = http_sendFile(i, "Sans.ttf", "font/ttf", 10000);
   } else if (http_matchPath(i, "exit") != NULL) {
     network_exit(0);
+  } else if (http_matchPath(i, "reset") != NULL) {
+    found = http_send(i, html_renderResetHTML, "text/html", 0, i);
   } else if (http_matchPath(i, "dashboard") != NULL) {
     found = http_sendFile(i, "roid.html", "text/html", 10000);
+  } else if (http_matchPath(i, "disconnect") != NULL) {
+    found = http_send(i, html_renderDisconnectHTML, "text/html", 0, i);
   }
 
   if (!found) {
@@ -693,7 +829,8 @@ http_processRequests(int i)
 {
   network_assertValidDashboard(i);
 
-  char* ptr = http_find(global.dashboard[i].buffer, "\n\n");
+  global.dashboard[i].buffer[global.dashboard[i].bufferIndex] = 0;
+  char* ptr = _http_find(global.dashboard[i].buffer, "\n\n", global.dashboard[i].bufferIndex, sizeof("\n\n"));
 
   if (ptr != NULL) { /* end of request */
     http_processRequest(i);
@@ -701,9 +838,14 @@ http_processRequests(int i)
     char* end = &global.dashboard[i].buffer[global.dashboard[i].bufferIndex];
     char* dest = global.dashboard[i].buffer;
     global.dashboard[i].bufferIndex -= (ptr - global.dashboard[i].buffer);
-    if (ptr < end) {
-      *dest = *ptr;
-      dest++, ptr++;
+    if (global.dashboard[i].bufferIndex < 0) {
+      /* this should not be possible */
+      global.dashboard[i].bufferIndex = 0;
+    } else {
+      if (ptr < end) {
+	*dest = *ptr;
+	dest++, ptr++;
+      }
     }
     global.dashboard[i].buffer[global.dashboard[i].bufferIndex] = 0;
   }
@@ -815,19 +957,42 @@ network_setupFDS(fd_set *read_fds)
 }
 
 
+static int
+network_matchAddr(uint32_t addr1, uint32_t addr2, uint32_t mask) {
+  addr1 = htonl(addr1);
+  addr2 = htonl(addr2);
+  return (addr1 & mask) == (addr2 & mask);
+}
+
+
 static void
 network_addConnection(int socketFD)
 {
   unsigned int i;
+
+  struct sockaddr_in addr;
+  socklen_t addr_size = sizeof(addr);
+
+  getpeername(socketFD, (struct sockaddr *)&addr, &addr_size);
+
+  for (i = 0; i < global.denyList.num; i++) {
+    if (network_matchAddr(global.denyList.entries[i].addr, addr.sin_addr.s_addr, global.dashboardAllowList.entries[i].mask)) {
+#ifdef AMIGA
+    log_printf("network_addConnection: blocked connection from: %s %x\n", Inet_NtoA(addr.sin_addr.s_addr), addr.sin_addr.s_addr);
+#else
+    log_printf("network_addConnection: blocked connection from: %s %x\n", inet_ntoa(addr.sin_addr), addr.sin_addr.s_addr);
+#endif
+      return;
+    }
+  }
+
   for (i = 0; i < countof(global.clients); i++) {
     if (global.clients[i].id == 0) {
       memset(&global.clients[i], 0, sizeof(global.clients[i]));
       global.clients[i].id = 1;
       global.clients[i].socketFD = socketFD;
-
+      global.clients[i].addr = addr;
       time(&global.clients[i].connected);
-      socklen_t addr_size = sizeof(struct sockaddr_in);
-      getpeername(socketFD, (struct sockaddr *)&global.clients[i].addr, &addr_size);
 #ifdef AMIGA
       strlcpy(global.clients[i].ip, Inet_NtoA(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
 #else
@@ -846,7 +1011,29 @@ network_addConnection(int socketFD)
 static void
 network_addDashboardConnection(int socketFD)
 {
-  unsigned int i;
+  unsigned int i, allowed = 0;
+
+  struct sockaddr_in addr;
+  socklen_t addr_size = sizeof(addr);
+
+  getpeername(socketFD, (struct sockaddr *)&addr, &addr_size);
+
+  for (i = 0; i < global.dashboardAllowList.num; i++) {
+    if (network_matchAddr(global.dashboardAllowList.entries[i].addr, addr.sin_addr.s_addr, global.dashboardAllowList.entries[i].mask)) {
+      allowed = 1;
+      break;
+    }
+  }
+
+  if (!allowed) {
+#ifdef AMIGA
+    log_printf("network_addDashboardConnection: blocked connection from: %s %x\n", Inet_NtoA(addr.sin_addr.s_addr), addr.sin_addr.s_addr);
+#else
+    log_printf("network_addDashboardConnection: blocked connection from: %s %x\n", inet_ntoa(addr.sin_addr), addr.sin_addr.s_addr);
+#endif
+    return;
+  }
+
   for (i = 0; i < countof(global.dashboard); i++) {
     if (global.dashboard[i].socketFD < 0) {
       global.dashboard[i].socketFD = socketFD;
@@ -863,33 +1050,33 @@ network_addDashboardConnection(int socketFD)
 
 
 int
-main_loadPassword(void)
+main_loadRootPath(void)
 {
-  FILE* fp = fopen("password.txt", "r");
+  FILE* fp = fopen("root.txt", "r");
   int success = 0;
 
-  memset(global.password, 0, sizeof(global.password));
+  memset(global.rootPath, 0, sizeof(global.rootPath));
 
   if (fp) {
-    if (fread(global.password, 1, sizeof(global.password)-1, fp) > 0) {
+    if (fread(global.rootPath, 1, sizeof(global.rootPath)-1, fp) > 0) {
       success = 1;
     }
     fclose(fp);
   } else {
-    log_printf("main_loadPassword: failed to open password.txt: %s\n", log_getError());
+    log_printf("main_loadRootPath: failed to open rootPath.txt: %s\n", log_getError());
   }
 
   unsigned i;
-  for (i = 0; i < sizeof(global.password); i++) {
-    if (!global.password[i]) {
+  for (i = 0; i < sizeof(global.rootPath); i++) {
+    if (!global.rootPath[i]) {
       break;
     }
-    if (global.password[i] == '\n') {
-      global.password[i] = 0;
+    if (global.rootPath[i] == '\n') {
+      global.rootPath[i] = 0;
     }
 
-    if (global.password[i] == '\r') {
-      global.password[i] = 0;
+    if (global.rootPath[i] == '\r') {
+      global.rootPath[i] = 0;
     }
   }
 
@@ -903,10 +1090,11 @@ main(int argc, char** argv)
   (void)argc;
   (void)argv;
 
-  if (!main_loadPassword()) {
-    log_printf("main: failed to load password\n");
+  if (!main_loadRootPath()) {
+    log_printf("main: failed to load root\n");
     return 1;
   }
+
 
 #ifdef AMIGA
   SocketBase = OpenLibrary((APTR)"bsdsocket.library", 4);
@@ -919,6 +1107,8 @@ main(int argc, char** argv)
   WSADATA wsaData;
   WSAStartup(MAKEWORD(2,2), &wsaData);
 #endif
+
+  html_renderReloadHTML(0); // load configuration
 
   unsigned int i;
   for (i = 0; i < countof(global.dashboard); i++) {

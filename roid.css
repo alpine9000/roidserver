@@ -17,6 +17,20 @@ h1 {
     padding-top: 1em;
 }
 
+button {
+    font-family: 'TOPAZ';
+    border-left: solid 2px #ccc;
+    border-top: solid 2px #ccc;
+    border-bottom: solid 2px black;
+    border-right: solid 2px black;
+    background: #ccc;
+    margin-left: 0.5em;
+}
+
+.controls {
+    text-align: right;
+}
+
 .container {
     padding: 5px;
 }
