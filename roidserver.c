@@ -36,6 +36,8 @@
 #define ROIDSERVER_MAX_CLIENTS            16
 #define ROIDSERVER_READY_STATE            (ROIDSERVER_NUM_PING_PACKETS+1)
 #define ROIDSERVER_HTTP_REQUEST_SEPARATOR "\r\n\r\n"
+#define ROIDSERVER_XFF_HEADER "X-Forwarded-For: "
+#define ROIDSERVER_ENABLE_PROXY           1
 //#define ROIDSERVER_ASSERTS
 //#define ROIDSERVER_MEASURE_TIME
 
@@ -554,12 +556,12 @@ network_numDashboardConnections(void)
 }
 
 
-#define http_find(a, b) _http_find(a, b, sizeof(a), sizeof(b))
 static char *
-_http_find(const char *haystack, const char *needle, int haystackLen, int needleLen)
+http_find(unsigned int dashboardIndex, const char *needle,  int needleLen)
 {
   char n, h;
-
+  char* haystack = global.dashboard[dashboardIndex].buffer;
+  int haystackLen = sizeof(global.dashboard[dashboardIndex].buffer);
   if ((n = *needle++) != '\0') {
     int len = strnlen(needle, needleLen);
     do {
@@ -576,6 +578,29 @@ _http_find(const char *haystack, const char *needle, int haystackLen, int needle
 }
 
 
+static char *
+http_matchRequest(unsigned int dashboardIndex, const char *request, int requestLen)
+{
+  char n, h;
+  char* haystack = global.dashboard[dashboardIndex].buffer;
+  int haystackLen = sizeof(global.dashboard[dashboardIndex].buffer);
+  const char terminator = '\n';
+
+  if ((n = *request++) != terminator && n != '\0') {
+    int len = strnlen(request, requestLen);
+    do {
+      do {
+	if ((h = *haystack++) == terminator || n == '\0' || haystackLen-- < 1)
+	  return (NULL);
+      } while (h != n);
+      if (len > haystackLen)
+	return (NULL);
+    } while (strncmp(haystack, request, len) != 0);
+    haystack--;
+  }
+  return ((char *)haystack);
+}
+
 static int
 main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
 {
@@ -590,7 +615,7 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
   if (fp) {
     while ((ptr = fgets(line, sizeof(line), fp))) {
       line[strcspn(line, "\n")] = 0;
-      char* mask = _http_find(line, "/", sizeof(line), sizeof("/"));
+      char* mask = strstr(line, "/");
       if (listSize <= list->num) {
 	listSize = listSize ? listSize*2 : 16;
 	list->entries = realloc(list->entries, sizeof(list->entries[0])*listSize);
@@ -629,7 +654,7 @@ html_renderDisconnectHTML(unsigned int dashboardIndex)
   network_assertValidDashboard(dashboardIndex);
 
   static char* result = "OK";
-  char* ptr = http_find(global.dashboard[dashboardIndex].buffer, "disconnect/");
+  char* ptr = http_matchRequest(dashboardIndex, "disconnect/", sizeof("disconnect/"));
 
   if (ptr) {
     ptr += strlen("disconnect/");
@@ -812,7 +837,71 @@ http_matchPath(int dashboardIndex, const char* path)
 
   static char buffer[1024];
   snprintf(buffer, sizeof(buffer), "GET /%s/%s", global.rootPath, path);
-  return http_find(global.dashboard[dashboardIndex].buffer, buffer);
+  return http_matchRequest(dashboardIndex, buffer, sizeof(buffer));
+}
+
+
+static int
+network_matchAddr(uint32_t addr1, uint32_t addr2, uint32_t mask) {
+  addr1 = htonl(addr1);
+  addr2 = htonl(addr2);
+  return (addr1 & mask) == (addr2 & mask);
+}
+
+
+#ifdef ROIDSERVER_ENABLE_PROXY
+static int
+http_checkProxyConnection(unsigned int dashboardIndex)
+{
+  network_assertValidDashboard(dashboardIndex);
+
+  char* xff = http_find(dashboardIndex, ROIDSERVER_XFF_HEADER, sizeof(ROIDSERVER_XFF_HEADER));
+
+  int allowed = 1;
+
+  if (xff) {
+    allowed = 0;
+    xff += strlen(ROIDSERVER_XFF_HEADER);
+    uint32_t addr =  inet_addr(xff);
+
+    unsigned int i;
+
+    for (i = 0; i < global.dashboardAllowList.num; i++) {
+      if (network_matchAddr(global.dashboardAllowList.entries[i].addr, addr, global.dashboardAllowList.entries[i].mask)) {
+	allowed = 1;
+	break;
+      }
+    }
+
+    if (!allowed) {
+#ifdef AMIGA
+      log_printf("network_addConnection: blocked connection from: %s %x\n", Inet_NtoA(addr), addr);
+#else
+      struct in_addr ia;
+      ia.s_addr = addr;
+      log_printf("network_addConnection: blocked connection from: %s %x\n", inet_ntoa(ia), addr);
+#endif
+    }
+  }
+
+  return allowed;
+}
+#else
+#define http_checkProxyConnection(x) 1
+#endif
+
+static int
+http_matchWildcard(unsigned int dashboardIndex, const char* path)
+{
+  network_assertValidDashboard(dashboardIndex);
+
+  char* ptr;
+
+  if ((ptr = http_matchRequest(dashboardIndex, "GET ", sizeof("GET "))) != NULL) {
+    return  http_matchRequest(dashboardIndex, path, strlen(path)) != NULL;
+  }
+
+  return 0;
 }
 
 
@@ -822,28 +911,34 @@ http_processRequest(int i)
   network_assertValidDashboard(i);
 
   int found = 0;
-  if (http_matchPath(i, "status") != NULL) {
-    found = http_send(i, html_renderDashboardHTML, "text/html", 0, i);
-  } else if (http_matchPath(i, "reload") != NULL) {
-    found = http_send(i, html_renderReloadHTML, "text/html", 0, i);
-  } else if (http_matchPath(i, "roid.css") != NULL) {
-    found = http_sendFile(i, "roid.css", "text/css", 10000);
-  } else if (http_find(global.dashboard[i].buffer, "GET /favicon.ico") != NULL) {
-    found = http_sendFile(i, "roid.ico", "image/vnd.microsoft.icon", 10000);
-  } else if (http_find(global.dashboard[i].buffer, "GET /Sans.ttf") != NULL) {
-    found = http_sendFile(i, "Sans.ttf", "font/ttf", 10000);
-  } else if (http_matchPath(i, "reset") != NULL) {
-    found = http_send(i, html_renderResetHTML, "text/html", 0, i);
-  } else if (http_matchPath(i, "dashboard") != NULL) {
-    found = http_sendFile(i, "roid.html", "text/html", 10000);
-  } else if (http_matchPath(i, "disconnect") != NULL) {
-    found = http_send(i, html_renderDisconnectHTML, "text/html", 0, i);
-  } else if (http_matchPath(i, "exit") != NULL) {
-    network_exit(0);
+  if (http_checkProxyConnection(i)) {
+    if (http_matchPath(i, "status") != NULL) {
+      found = http_send(i, html_renderDashboardHTML, "text/html", 0, i);
+    } else if (http_matchPath(i, "reload") != NULL) {
+      found = http_send(i, html_renderReloadHTML, "text/html", 0, i);
+    } else if (http_matchPath(i, "roid.css") != NULL) {
+      found = http_sendFile(i, "roid.css", "text/css", 10000);
+    } else if (http_matchRequest(i, "GET /favicon.ico", sizeof("GET /favicon.ico")) != NULL) {
+      found = http_sendFile(i, "roid.ico", "image/vnd.microsoft.icon", 10000);
+    } else if (http_matchPath(i, "reset") != NULL) {
+      found = http_send(i, html_renderResetHTML, "text/html", 0, i);
+    } else if (http_matchPath(i, "dashboard") != NULL) {
+      found = http_sendFile(i, "roid.html", "text/html", 10000);
+    } else if (http_matchPath(i, "disconnect") != NULL) {
+      found = http_send(i, html_renderDisconnectHTML, "text/html", 0, i);
+    } else if (http_matchPath(i, "exit") != NULL) {
+      network_exit(0);
+    }
   }
 
+
   if (!found) {
-    http_sendFile(i, "404.html", "text/html", 10000);
+    if (http_matchWildcard(i, "Sans.ttf")) {
+      found = http_sendFile(i, "Sans.ttf", "font/ttf", 10000);
+    }
+    if (!found) {
+      http_sendFile(i, "404.html", "text/html", 10000);
+    }
   }
 }
 
@@ -892,7 +987,7 @@ network_sendDashboardData(void)
   for (i = 0; i < countof(global.dashboard); i++) {
     if (global.dashboard[i].socketFD >= 0) {
       char* ptr;
-      while ((ptr = http_find(global.dashboard[i].buffer, ROIDSERVER_HTTP_REQUEST_SEPARATOR)) != NULL) { /* end of request */
+      while ((ptr = http_find(i, ROIDSERVER_HTTP_REQUEST_SEPARATOR, sizeof(ROIDSERVER_HTTP_REQUEST_SEPARATOR))) != NULL) { /* end of request */
 	http_processRequests(ptr, i);
       }
     }
@@ -987,14 +1082,6 @@ network_setupFDS(fd_set *read_fds)
   }
 
   return maxFD;
-}
-
-
-static int
-network_matchAddr(uint32_t addr1, uint32_t addr2, uint32_t mask) {
-  addr1 = htonl(addr1);
-  addr2 = htonl(addr2);
-  return (addr1 & mask) == (addr2 & mask);
 }
 
 
