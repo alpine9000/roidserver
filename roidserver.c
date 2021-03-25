@@ -134,6 +134,7 @@ typedef struct {
   uint32_t lag;
   int sent;
   int recv;
+  uint32_t networkPlayer;
 } client_connection_t;
 
 typedef struct {
@@ -420,6 +421,7 @@ network_setId(unsigned int index, uint32_t id)
   }
 
   if (count < 2) {
+    global.clients[index].networkPlayer = count;
     global.clients[index].id = id;
     log_printf("network_setId: assigning %d to %x\n", index, id);
   }
@@ -477,10 +479,11 @@ network_processPing(int index)
 {
   network_assertValidClient(index);
   uint32_t packet = network_getPacket(index);
-  log_printf("network_processPing: %d: %x\n", index, packet);
   if (packet == 0xdeadbeef) {
     global.clients[index].state++;
-    network_send(index, (void*)&packet, sizeof(packet));
+    log_printf("network_processPing: %d: %x networkPlayer: %d\n", index, packet,     global.clients[index].networkPlayer);
+    uint32_t networkPlayer = htonl(global.clients[index].networkPlayer);
+    network_send(index, (void*)&networkPlayer, sizeof(networkPlayer));
   } else {
     log_printf("network_processPing: failed\n");
     network_removeConnection(index);
