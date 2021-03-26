@@ -2,10 +2,16 @@ SRCS=roidserver.c
 HEADERS=
 COMMON_DEPS=Makefile
 
+ifeq ($(OS),Windows_NT)
+else
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
 STATIC_ANALYZE=-fsanitize=address -fsanitize=undefined
-DEBUG_CFLAGS=-g $(STATIC_ANALYZE)
 WARNINGS=-Wno-error=format -Wno-format -Wall -Werror -Wall -Wpedantic -Wno-unknown-attributes -Wno-ignored-optimization-argument -Wno-unknown-pragmas  -Wmissing-field-initializers -Wfatal-errors -Wextra -Wshadow -Wuninitialized  -Wundef -Wbad-function-cast -Wparentheses -Wnull-dereference -pedantic-errors
+endif
+endif
 
+DEBUG_CFLAGS=-g $(STATIC_ANALYZE)
 OBJS=$(addprefix build/obj/, $(SRCS:.c=.o))
 CFLAGS=-O2 $(WARNINGS) $(DEBUG_CFLAGS)
 
