@@ -8,6 +8,10 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 STATIC_ANALYZE=-fsanitize=address -fsanitize=undefined
 WARNINGS=-Wno-error=format -Wno-format -Wall -Werror -Wall -Wpedantic -Wno-unknown-attributes -Wno-ignored-optimization-argument -Wno-unknown-pragmas  -Wmissing-field-initializers -Wfatal-errors -Wextra -Wshadow -Wuninitialized  -Wundef -Wbad-function-cast -Wparentheses -Wnull-dereference -pedantic-errors
+else
+#CC=gcc-10
+#STATIC_ANALYZE=-fanalyzer -fsanitize=address -fsanitize=leak -fsanitize=undefined 
+#WARNINGS=-Wall
 endif
 endif
 
