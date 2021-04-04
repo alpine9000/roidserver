@@ -196,7 +196,7 @@ struct Library *SocketBase = 0;
 
 #ifdef ROID_NEED_SAFE_STRING_FILLS
 
-#if !defined(_WIN32) && (defined(AMIGA) || defined(__linux__) && _POSIX_C_SOURCE < 200809L)
+#if defined(AMIGA) || (!defined(_WIN32) && (defined(__linux__) && _POSIX_C_SOURCE < 200809L))
 static int
 strnlen(const char *s, size_t max)
 {
