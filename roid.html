@@ -56,7 +56,7 @@
     function ban()
     {
 	var clientId = this.getAttribute("clientid");
-	console.log("BANNING: " + clientId);
+	fetch('ban/' + clientId, fetchOpts);
     }
 
     function addButton(element, name, functor)

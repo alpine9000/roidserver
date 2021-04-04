@@ -10,7 +10,7 @@ STATIC_ANALYZE=-fsanitize=address -fsanitize=undefined
 WARNINGS=-Wno-error=format -Wno-format -Wall -Werror -Wall -Wpedantic -Wno-unknown-attributes -Wno-ignored-optimization-argument -Wno-unknown-pragmas  -Wmissing-field-initializers -Wfatal-errors -Wextra -Wshadow -Wuninitialized  -Wundef -Wbad-function-cast -Wparentheses -Wnull-dereference -pedantic-errors
 else
 #CC=gcc-10
-#STATIC_ANALYZE=-fanalyzer -fsanitize=address -fsanitize=leak -fsanitize=undefined 
+#STATIC_ANALYZE=-fanalyzer -fsanitize=address -fsanitize=leak -fsanitize=undefined
 #WARNINGS=-Wall
 endif
 endif
@@ -27,7 +27,7 @@ WIN32_LIBS=-lws2_32
 
 AMIGA_OBJS=$(addprefix build/amiga/, $(SRCS:.c=.o))
 AMIGA_CC=/usr/local/amiga/bebbo/bin/m68k-amigaos-gcc
-AMIGA_CFLAGS=-O2 -DAMIGA -noixemul -fomit-frame-pointer
+AMIGA_CFLAGS=-O0 -DAMIGA -noixemul -fomit-frame-pointer
 AMIGA_LDFLAGS=-s
 AMIGA_LIBS=-lamiga
 
@@ -41,7 +41,7 @@ build/obj/%.o: %.c $(HEADERS) $(COMMON_DEPS)
 	@mkdir -p build/obj
 	$(CC) -c $(CFLAGS) $*.c -o build/obj/$*.o
 
-build/amiga/%.o: %.c $(HEADERS) $(COMMON_DEPS)
+build/amiga/%.o: %.c $(HEADERS) $(COMMON_DEPS) amigagui.c
 	@mkdir -p build/amiga
 	$(AMIGA_CC) -c $(AMIGA_CFLAGS) $*.c -o build/amiga/$*.o
 

@@ -23,10 +23,18 @@
 #include <unistd.h>
 #endif
 
+//#define AMIGA_GUI
+
 #ifdef AMIGA
 #include <proto/exec.h>
 #include <proto/socket.h>
 #define localtime_r(a, b) localtime(a)
+#ifdef AMIGA_GUI
+void
+amiga_cleanupGUI(void);
+void
+amiga_updateNumConnectedFighters(int num);
+#endif
 #endif
 
 #define ROIDSERVER_DASHBOARD
@@ -101,7 +109,7 @@ _w32_getError(void)
     time(&t);								\
     struct tm now;							\
     localtime_s(&now, &t);						\
-    printf("%02d/%02d/%d %02d:%02d:%02d : ", now.tm_mday, now.tm_mon+1, 1900+now.tm_year, now.tm_hour, now.tm_min, now.tm_sec); \
+    printf("%02d/%02d/%d %02d:%02d:%02d : %s: ", now.tm_mday, now.tm_mon+1, 1900+now.tm_year, now.tm_hour, now.tm_min, now.tm_sec, __func__); \
   }
 #else
 #define log_printNow() if (global.loggingEnabled) {			\
@@ -110,7 +118,7 @@ _w32_getError(void)
     struct tm *l;							\
     struct tm now;							\
     l = localtime_r(&t, &now);						\
-    printf("%02d/%02d/%d %02d:%02d:%02d : ", l->tm_mday, l->tm_mon+1, 1900+l->tm_year, l->tm_hour, l->tm_min, l->tm_sec); \
+    printf("%02d/%02d/%d %02d:%02d:%02d : %s: ", l->tm_mday, l->tm_mon+1, 1900+l->tm_year, l->tm_hour, l->tm_min, l->tm_sec, __func__); \
   }
 #endif
 
@@ -145,6 +153,8 @@ typedef struct {
   int socketFD;
   char buffer[4096];
   int bufferIndex;
+  char ip[20];
+  int proxy;
 } dashboard_connection_t;
 #endif
 
@@ -156,6 +166,7 @@ typedef struct {
 typedef struct {
   allowdeny_addr_t* entries;
   unsigned int num;
+  unsigned int size;
 } allowdeny_list_t;
 
 typedef struct {
@@ -171,6 +182,9 @@ typedef struct {
 #endif
 
   int loggingEnabled;
+#ifdef AMIGA_GUI
+  struct Window* window;
+#endif
 } global_t;
 
 
@@ -254,6 +268,9 @@ network_exit(int error)
   if (SocketBase) {
     CloseLibrary(SocketBase);
   }
+#ifdef AMIGA_GUI
+  amiga_cleanupGUI();
+#endif
 #endif
   exit(error);
 }
@@ -264,7 +281,7 @@ static void
 _network_assertValidClient(int index)
 {
   if (index < 0 || index >= (int)countof(global.clients)) {
-    log_printf("network_assertValidClient: invalid client: %d\n", index);
+    log_printf("invalid client: %d\n", index);
     network_exit(5);
   }
 }
@@ -275,7 +292,7 @@ static void
 _network_assertValidDashboard(int index)
 {
   if (index < 0 || index >= (int)countof(global.dashboard)) {
-    log_printf("network_assertValidDashboard: invalid dashboard: %d\n", index);
+    log_printf("invalid dashboard: %d\n", index);
     network_exit(5);
   }
 }
@@ -304,7 +321,7 @@ network_serverTCP(int port)
   socket_fd = socket(AF_INET, SOCK_STREAM, 0);
 
   if (socket_fd < 0) {
-    log_printf("network_serverTCP: socket() failed: %s\n", log_getError());
+    log_printf("socket() failed: %s\n", log_getError());
     return -1;
   }
 
@@ -316,13 +333,13 @@ network_serverTCP(int port)
   setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, (void*) &ONE, sizeof(ONE));
 
   if (bind(socket_fd, (struct sockaddr *)&sa, sizeof(sa)) == -1) {
-    log_printf("network_serverTCP: bind() failed: %s\n", log_getError());
+    log_printf("bind() failed: %s\n", log_getError());
     network_closeSocket(socket_fd);
     return -1;
   }
 
   if (listen(socket_fd,5)) {
-    log_printf("network_serverTCP: listen() failed: %s\n", log_getError());
+    log_printf("listen() failed: %s\n", log_getError());
   }
 
 #ifdef AMIGA
@@ -341,6 +358,20 @@ network_serverTCP(int port)
   return socket_fd;
 }
 
+#if defined(AMIGA_GUI) || defined(ROIDSERVER_DASHBOARD)
+static int
+network_numClientConnections(void)
+{
+  int total = 0;
+  unsigned int i;
+  for (i = 0; i < countof(global.clients); i++) {
+    if (global.clients[i].id != 0) {
+      total++;
+    }
+  }
+  return total;
+}
+#endif
 
 static void
 network_removeConnection(int index)
@@ -351,16 +382,35 @@ network_removeConnection(int index)
   if (id != 0) {
     for (i = 0; i < countof(global.clients); i++) {
       if (id == global.clients[i].id) {
-	log_printf("network_processClientData: removing connection slot: %d\n", i);
+	log_printf("removing connection slot: %d\n", i);
 	network_closeSocket(global.clients[i].socketFD);
 	global.clients[i].id = 0;
       }
     }
   } else {
-    log_printf("network_processClientData: removing connection slot: %d\n", index);
+    log_printf("removing connection slot: %d\n", index);
     network_closeSocket(global.clients[index].socketFD);
   }
+
+#ifdef AMIGA_GUI
+  amiga_updateNumConnectedFighters(network_numClientConnections());
+#endif
 }
+
+
+static void
+main_addToAllowDenyList(allowdeny_list_t* list, uint32_t addr, uint32_t mask)
+{
+  if (list->size <= list->num) {
+    list->size = list->size ? list->size*2 : 16;
+    list->entries = realloc(list->entries, sizeof(list->entries[0])*list->size);
+  }
+
+  list->entries[list->num].addr = addr;
+  list->entries[list->num].mask = mask;
+  list->num++;
+}
+
 
 static int
 main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
@@ -368,8 +418,8 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
   FILE* fp = fopen(filename, "r");
   char line[256];
   char* ptr;
-  unsigned int listSize = 0;
 
+  list->size = 0;
   list->num = 0;
   list->entries = 0;
 
@@ -377,32 +427,32 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
     while ((ptr = fgets(line, sizeof(line), fp))) {
       line[strcspn(line, "\n")] = 0;
       char* mask = strstr(line, "/");
-      if (listSize <= list->num) {
-	listSize = listSize ? listSize*2 : 16;
-	list->entries = realloc(list->entries, sizeof(list->entries[0])*listSize);
-      }
+      uint32_t maskAddr;
+	uint32_t ipAddr;
+
       if (mask != NULL) {
 	mask++;
 	struct in_addr addr;
 	if (_inet_aton(mask, &addr) == 1) {
-	  list->entries[list->num].mask = htonl(addr.s_addr);
+	  maskAddr = htonl(addr.s_addr);
 	} else {
-	  log_printf("main_loadAllowDenyList(%s): failed to parse mask: %s\n", filename, mask);
-	  list->entries[list->num].mask = 0;
+	  log_printf("[%s] failed to parse mask: %s\n", filename, mask);
+	  maskAddr = 0;
 	}
 	line[strcspn(line, "/")] = 0;
-	list->entries[list->num].addr = inet_addr(line);
+	ipAddr = inet_addr(line);
       } else {
-	list->entries[list->num].mask = 0xFFFFFFFF;
-	list->entries[list->num].addr = inet_addr(line);
+	maskAddr = 0xFFFFFFFF;
+	mask = "255.255.255.255";
+	ipAddr = inet_addr(line);
       }
-      log_printf("main_loadAllowDenyList(%s): adding %s -> %x mask(%x)\n", filename, line, (uint32_t)list->entries[list->num].addr, list->entries[list->num].mask);
-      list->num++;
+      log_printf("[%s] adding %s/%s\n", filename, line, mask);
+      main_addToAllowDenyList(list, ipAddr, maskAddr);
     }
 
     fclose(fp);
   } else {
-    log_printf("main_loadAllowDenyList(%s): failed to open %s\n", filename, log_getError());
+    log_printf("[%s] failed to open (%s)\n", filename, log_getError());
   }
 
   return list->num > 0;
@@ -421,24 +471,12 @@ static void
 main_loadDenyList(void)
 {
   if (!main_loadAllowDenyList(&global.denyList, "deny.txt")) {
-    log_printf("main: WARNING: failed to load deny list\n");
+    log_printf("WARNING: failed to load deny list\n");
   }
 }
 
 
 #ifdef ROIDSERVER_DASHBOARD
-static int
-network_numClientConnections(void)
-{
-  int total = 0;
-  unsigned int i;
-  for (i = 0; i < countof(global.clients); i++) {
-    if (global.clients[i].id != 0) {
-      total++;
-    }
-  }
-  return total;
-}
 
 
 static void
@@ -530,6 +568,61 @@ dashboard_renderDisconnectHTML(unsigned int dashboardIndex)
 }
 
 
+static void
+main_appendToDenyFile(unsigned int i)
+{
+  network_assertValidClient(i);
+  FILE* fp = fopen("deny.txt", "a");
+  int ok = 0;
+
+  if (fp) {
+    const char* addr;
+#ifdef AMIGA
+    addr = Inet_NtoA(global.clients[i].addr.sin_addr.s_addr);
+#else
+    addr = inet_ntoa(global.clients[i].addr.sin_addr);
+#endif
+
+    ok = fwrite(addr, strlen(addr), 1, fp) == 1 && fwrite("\n", strlen("\n"), 1, fp) == 1;
+
+    if (!ok) {
+      log_printf("failed to append %s to deny list\n", addr);
+    }
+
+    fclose(fp);
+  } else {
+    log_printf("failed to open deny list\n");
+  }
+}
+
+
+static const char*
+dashboard_renderBanHTML(unsigned int dashboardIndex)
+{
+  network_assertValidDashboard(dashboardIndex);
+
+  static char* result = "OK";
+  char* ptr = http_matchRequest(dashboardIndex, "ban/", sizeof("ban/"));
+
+  if (ptr) {
+    ptr += strlen("ban/");
+    unsigned int i;
+    if (sscanf(ptr, "%d", &i) == 1) {
+      if (i < countof(global.clients)) {
+	log_printf("banning %d %s\n", i, global.clients[i].ip);
+	main_addToAllowDenyList(&global.denyList, global.clients[i].addr.sin_addr.s_addr, 0xFFFFFFFF);
+	main_appendToDenyFile(i);
+	network_removeConnection(i);
+      } else {
+	log_printf("invalid client index %d\n", i);
+      }
+    }
+  }
+
+  return result;
+}
+
+
 static const char*
 dashboard_renderReloadHTML(unsigned int dashboardIndex)
 {
@@ -538,7 +631,7 @@ dashboard_renderReloadHTML(unsigned int dashboardIndex)
   static char* buffer = "OK";
 
   if (!main_loadAllowDenyList(&global.dashboardAllowList, "allow.txt")) {
-    log_printf("main: WARNING: failed to load allow list\n");
+    log_printf("WARNING: failed to load allow list\n");
   }
 
   main_loadDenyList();
@@ -716,6 +809,13 @@ http_checkProxyConnection(unsigned int dashboardIndex)
     xff += strlen(ROIDSERVER_XFF_HEADER);
     uint32_t addr =  inet_addr(xff);
 
+    if (!global.dashboard[dashboardIndex].proxy) {
+      strlcpy(global.dashboard[dashboardIndex].ip, xff, sizeof(global.dashboard[dashboardIndex].ip));
+      global.dashboard[dashboardIndex].ip[15] = 0;
+      global.dashboard[dashboardIndex].proxy = 1;
+      log_printf("%s: proxy connection\n", global.dashboard[dashboardIndex].ip);
+    }
+
     unsigned int i;
 
     for (i = 0; i < global.dashboardAllowList.num; i++) {
@@ -727,11 +827,11 @@ http_checkProxyConnection(unsigned int dashboardIndex)
 
     if (!allowed) {
 #ifdef AMIGA
-      log_printf("network_addConnection: blocked connection from: %s %x\n", Inet_NtoA(addr), addr);
+      log_printf("blocked connection from: %s %x\n", Inet_NtoA(addr), addr);
 #else
       struct in_addr ia;
       ia.s_addr = addr;
-      log_printf("network_addConnection: blocked connection from: %s %x\n", inet_ntoa(ia), addr);
+      log_printf("blocked connection from: %s %x\n", inet_ntoa(ia), addr);
 #endif
     }
   }
@@ -779,6 +879,8 @@ http_processRequest(int i)
       found = http_sendFile(i, "roid.html", "text/html", ROIDSERVER_CACHE_TIMEOUT_SECONDS);
     } else if (http_matchPath(i, "disconnect") != NULL) {
       found = http_send(i, dashboard_renderDisconnectHTML, "text/html", 0, i);
+    } else if (http_matchPath(i, "ban") != NULL) {
+      found = http_send(i, dashboard_renderBanHTML, "text/html", 0, i);
     } else if (http_matchPath(i, "exit") != NULL) {
       network_exit(0);
     }
@@ -864,27 +966,31 @@ network_addDashboardConnection(int socketFD)
     }
   }
 
-  if (!allowed) {
+  char* ip;
 #ifdef AMIGA
-    log_printf("network_addDashboardConnection: blocked connection from: %s %x\n", Inet_NtoA(addr.sin_addr.s_addr), addr.sin_addr.s_addr);
+  ip = Inet_NtoA(addr.sin_addr.s_addr);
 #else
-    log_printf("network_addDashboardConnection: blocked connection from: %s %x\n", inet_ntoa(addr.sin_addr), addr.sin_addr.s_addr);
+  ip = inet_ntoa(addr.sin_addr);
 #endif
+  if (!allowed) {
+    log_printf("%s: blocked connection (%x)\n", ip, addr.sin_addr.s_addr);
     return;
   }
 
   for (i = 0; i < countof(global.dashboard); i++) {
     if (global.dashboard[i].socketFD < 0) {
+      global.dashboard[i].proxy = 0;
       global.dashboard[i].socketFD = socketFD;
       global.dashboard[i].bufferIndex = 0;
       global.dashboard[i].buffer[global.dashboard[i].bufferIndex] = 0;
-      log_printf("network_addDashboardConnection: new dashboard slot: %d fd: %d\n", i, socketFD);
+      strlcpy(global.dashboard[i].ip, ip, sizeof(global.dashboard[i].ip));
+      log_printf("%s: new dashboard slot: %d fd: %d\n", ip, i, socketFD);
       return;
     }
   }
 
   network_closeSocket(socketFD);
-  log_printf("network_addDashboardConnection: no free slots\n");
+  log_printf("%s: no free slots\n", ip);
 }
 
 
@@ -902,7 +1008,7 @@ dashboard_loadRootPath(void)
     }
     fclose(fp);
   } else {
-    log_printf("dashboard_loadRootPath: failed to open rootPath.txt: %s\n", log_getError());
+    log_printf("failed to open rootPath.txt: %s\n", log_getError());
   }
 
   unsigned i;
@@ -967,7 +1073,7 @@ network_accept(int serverFD)
   } while (accept_fd == -1);
   if (accept_fd < 0 ) {
     if (accept_fd < 0) {
-      log_printf("network_accept: accept() failed: %s\n", log_getError());
+      log_printf("accept() failed: %s\n", log_getError());
     } else {
       network_closeSocket(accept_fd);
     }
@@ -1010,7 +1116,7 @@ network_setId(unsigned int index, uint32_t id)
   if (count < 2) {
     global.clients[index].networkPlayer = count;
     global.clients[index].id = id;
-    log_printf("network_setId: assigning %d to %x\n", index, id);
+    log_printf("assigning %d to %x\n", index, id);
   }
 
   return count < 2;
@@ -1037,10 +1143,10 @@ network_processId(int index)
 {
   network_assertValidClient(index);
   uint32_t packet = network_getPacket(index);
-  log_printf("network_processId: %d: %x\n", index, packet);
+  log_printf("%d: %x\n", index, packet);
   global.clients[index].state++;
   if (!network_setId(index, packet)) {
-    log_printf("network_processId: failed\n");
+    log_printf("failed\n");
     network_removeConnection(index);
   }
 }
@@ -1050,7 +1156,7 @@ static int
 network_send(int clientIndex, void* data, int len)
 {
   if (send(global.clients[clientIndex].socketFD, data, len, MSG_DONTWAIT) != len) {
-    log_printf("network_send: failed\n");
+    log_printf("failed\n");
     network_removeConnection(clientIndex);
   } else {
     global.clients[clientIndex].sent += len;
@@ -1068,11 +1174,11 @@ network_processPing(int index)
   uint32_t packet = network_getPacket(index);
   if (packet == 0xdeadbeef) {
     global.clients[index].state++;
-    log_printf("network_processPing: %d: %x networkPlayer: %d\n", index, packet,     global.clients[index].networkPlayer);
+    log_printf("%d: %x networkPlayer: %d\n", index, packet, global.clients[index].networkPlayer);
     uint32_t networkPlayer = htonl(global.clients[index].networkPlayer);
     network_send(index, (void*)&networkPlayer, sizeof(networkPlayer));
   } else {
-    log_printf("network_processPing: failed\n");
+    log_printf("failed\n");
     network_removeConnection(index);
   }
 }
@@ -1084,7 +1190,7 @@ network_processLag(int index)
   network_assertValidClient(index);
   global.clients[index].state++;
   global.clients[index].lag = htonl(*(uint32_t*)global.clients[index].buffer);
-  log_printf("network_processLag: %d: %x\n", index, global.clients[index].lag);
+  log_printf("%d: %x\n", index, global.clients[index].lag);
 }
 
 
@@ -1133,13 +1239,13 @@ network_processClientData(fd_set *read_fds)
 	  if (global.clients[i].bufferIndex < (int)(countof(global.clients[i].buffer)-1)) {
 	    global.clients[i].bufferIndex++;
 	  } else {
-	    log_printf("network_processClientData: failed: buffer exhausted\n");
+	    log_printf("failed: buffer exhausted\n");
 	    network_removeConnection(i);
 	    done = 1;
 	  }
 	} else {
 	  if (len == 0) {
-	    log_printf("network_processClientData: failed: %s\n", log_getError());
+	    log_printf("failed: %s\n", log_getError());
 	    network_removeConnection(i);
 	  }
 	  done = 1;
@@ -1204,10 +1310,11 @@ network_addConnection(int socketFD)
   for (i = 0; i < global.denyList.num; i++) {
     if (network_matchAddr(global.denyList.entries[i].addr, addr.sin_addr.s_addr, global.denyList.entries[i].mask)) {
 #ifdef AMIGA
-    log_printf("network_addConnection: blocked connection from: %s %x\n", Inet_NtoA(addr.sin_addr.s_addr), addr.sin_addr.s_addr);
+      log_printf("%s: blocked connection (%x)\n", Inet_NtoA(addr.sin_addr.s_addr), addr.sin_addr.s_addr);
 #else
-    log_printf("network_addConnection: blocked connection from: %s %x\n", inet_ntoa(addr.sin_addr), addr.sin_addr.s_addr);
+      log_printf("%s: blocked connection (%x)\n", inet_ntoa(addr.sin_addr), addr.sin_addr.s_addr);
 #endif
+      network_closeSocket(socketFD);
       return;
     }
   }
@@ -1224,17 +1331,23 @@ network_addConnection(int socketFD)
 #else
       strlcpy(global.clients[i].ip, inet_ntoa(global.clients[i].addr.sin_addr), sizeof(global.clients[i].ip));
 #endif
-      log_printf("network_addConnection: new client slot: %d fd: %d\n", i, socketFD);
+      log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
+#ifdef AMIGA_GUI
+      amiga_updateNumConnectedFighters(network_numClientConnections());
+#endif
+
       return;
     }
   }
 
   network_closeSocket(socketFD);
-  log_printf("network_addConnection: no free slots\n");
+  log_printf("no free slots\n");
 }
 
 
-
+#ifdef AMIGA_GUI
+#include "amigagui.c"
+#endif
 
 int
 main(int argc, char** argv)
@@ -1247,9 +1360,13 @@ main(int argc, char** argv)
 
 #ifdef AMIGA
   SocketBase = OpenLibrary((APTR)"bsdsocket.library", 4);
+
   if (!SocketBase) {
     network_exit(1);
   }
+#ifdef AMIGA_GUI
+  amiga_openWindow();
+#endif
 #endif
 
 #ifdef _WIN32
@@ -1260,7 +1377,7 @@ main(int argc, char** argv)
 
 #ifdef ROIDSERVER_DASHBOARD
   if (!dashboard_loadRootPath()) {
-    log_printf("main: failed to load root\n");
+    log_printf("failed to load root\n");
     return 1;
   }
 
@@ -1288,27 +1405,40 @@ main(int argc, char** argv)
   fd_set read_fds;
   int maxFD = 0;
 
-  log_printf("roidserver: ready\n");
+  log_printf("ready\n");
 
   do {
     maxFD = network_setupFDS(&read_fds);
 
 #ifdef AMIGA
-    int task = WaitSelect(maxFD + 1, &read_fds, NULL, NULL, NULL, NULL);
+    ULONG signals = 0;
+#ifdef AMIGA_GUI
+    signals |= 1 << global.window->UserPort->mp_SigBit;
+#endif
+    int task = WaitSelect(maxFD + 1, &read_fds, NULL, NULL, NULL, &signals);
+#ifdef AMIGA_GUI
+    if (signals && 1 << global.window->UserPort->mp_SigBit) {
+      int done = handleIDCMP(global.window, 0);
+      if (done) {
+	network_exit(0);
+      }
+    }
+#endif
 #else
     int task = select(maxFD + 1, &read_fds, NULL, NULL, NULL);
 #endif
 
+
     switch (task) {
     case -1:
-      log_printf("main: select failed: %s\n", log_getError());
+      log_printf("select() failed: %s\n", log_getError());
       network_exit(3);
       break;
     default:
       if (FD_ISSET(global.serverFD, &read_fds)) {
 	int clientFD = network_accept(global.serverFD);
 	if (clientFD < 0) {
-	  log_printf("main: network_accept failed: %s\n", log_getError());
+	  log_printf("network_accept() failed: %s\n", log_getError());
 	} else {
 	  network_addConnection(clientFD);
 	}
@@ -1318,7 +1448,7 @@ main(int argc, char** argv)
       if (FD_ISSET(global.dashboardFD, &read_fds)) {
 	int clientFD = network_accept(global.dashboardFD);
 	if (clientFD < 0) {
-	  log_printf("main: network_accept failed: %s\n", log_getError());
+	  log_printf("network_accept() failed: %s\n", log_getError());
 	} else {
 	  network_addDashboardConnection(clientFD);
 	}
