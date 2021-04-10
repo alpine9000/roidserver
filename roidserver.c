@@ -596,6 +596,18 @@ dashboard_renderDisconnectHTML(unsigned int dashboardIndex)
   return result;
 }
 
+static char*
+network_ntoa(uint32_t addr)
+{
+#ifdef AMIGA
+  return Inet_NtoA(addr);
+#else
+  struct in_addr inAddr;
+  inAddr.s_addr = addr;
+  return inet_ntoa(inAddr);
+#endif
+}
+
 
 static void
 main_appendToDenyFile(unsigned int i)
@@ -606,11 +618,7 @@ main_appendToDenyFile(unsigned int i)
 
   if (fp) {
     const char* addr;
-#ifdef AMIGA
-    addr = Inet_NtoA(global.clients[i].addr.sin_addr.s_addr);
-#else
-    addr = inet_ntoa(global.clients[i].addr.sin_addr);
-#endif
+    addr = network_ntoa(global.clients[i].addr.sin_addr.s_addr);
 
     ok = fwrite(addr, strlen(addr), 1, fp) == 1 && fwrite("\n", strlen("\n"), 1, fp) == 1;
 
@@ -839,7 +847,7 @@ http_checkProxyConnection(unsigned int dashboardIndex)
     uint32_t addr =  inet_addr(xff);
 
     if (!global.dashboard[dashboardIndex].proxy) {
-      strlcpy(global.dashboard[dashboardIndex].ip, xff, sizeof(global.dashboard[dashboardIndex].ip));
+      strlcpy(global.dashboard[dashboardIndex].ip, network_ntoa(addr), sizeof(global.dashboard[dashboardIndex].ip));
       global.dashboard[dashboardIndex].ip[15] = 0;
       global.dashboard[dashboardIndex].proxy = 1;
       log_printf("%s: proxy connection\n", global.dashboard[dashboardIndex].ip);
@@ -855,13 +863,7 @@ http_checkProxyConnection(unsigned int dashboardIndex)
     }
 
     if (!allowed) {
-#ifdef AMIGA
-      log_printf("blocked connection from: %s %x\n", Inet_NtoA(addr), addr);
-#else
-      struct in_addr ia;
-      ia.s_addr = addr;
-      log_printf("blocked connection from: %s %x\n", inet_ntoa(ia), addr);
-#endif
+      log_printf("blocked connection from: %s %x\n", network_ntoa(addr), addr);
     }
   }
 
@@ -995,12 +997,8 @@ network_addDashboardConnection(int socketFD)
     }
   }
 
-  char* ip;
-#ifdef AMIGA
-  ip = Inet_NtoA(addr.sin_addr.s_addr);
-#else
-  ip = inet_ntoa(addr.sin_addr);
-#endif
+  char* ip = network_ntoa(addr.sin_addr.s_addr);
+
   if (!allowed) {
     log_printf("%s: blocked connection (%x)\n", ip, addr.sin_addr.s_addr);
     return;
@@ -1338,11 +1336,7 @@ network_addConnection(int socketFD)
 
   for (i = 0; i < global.denyList.num; i++) {
     if (network_matchAddr(global.denyList.entries[i].addr, addr.sin_addr.s_addr, global.denyList.entries[i].mask)) {
-#ifdef AMIGA
-      log_printf("%s: blocked connection (%x)\n", Inet_NtoA(addr.sin_addr.s_addr), addr.sin_addr.s_addr);
-#else
-      log_printf("%s: blocked connection (%x)\n", inet_ntoa(addr.sin_addr), addr.sin_addr.s_addr);
-#endif
+      log_printf("%s: blocked connection (%x)\n", network_ntoa(addr.sin_addr.s_addr), addr.sin_addr.s_addr);
       network_closeSocket(socketFD);
       return;
     }
@@ -1355,11 +1349,7 @@ network_addConnection(int socketFD)
       global.clients[i].socketFD = socketFD;
       global.clients[i].addr = addr;
       time(&global.clients[i].connected);
-#ifdef AMIGA
-      strlcpy(global.clients[i].ip, Inet_NtoA(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
-#else
-      strlcpy(global.clients[i].ip, inet_ntoa(global.clients[i].addr.sin_addr), sizeof(global.clients[i].ip));
-#endif
+      strlcpy(global.clients[i].ip, network_ntoa(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
       log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
 #ifdef AMIGA_GUI
       amiga_updateNumConnectedFighters(network_numClientConnections());
