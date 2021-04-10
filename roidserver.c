@@ -39,8 +39,6 @@ amiga_updateNumConnectedFighters(int num);
 
 #define ROIDSERVER_DASHBOARD
 #define ROIDSERVER_LOGGING
-#define ROIDSERVER_GAME_PORT              9000
-#define ROIDSERVER_DASHBOARD_PORT         9001
 #define ROIDSERVER_NUM_PING_PACKETS       8
 #define ROIDSERVER_MAX_CLIENTS            16
 
@@ -171,10 +169,14 @@ typedef struct {
 
 typedef struct {
   int serverFD;
+  int port;
+
+
   client_connection_t clients[ROIDSERVER_MAX_CLIENTS];
   allowdeny_list_t denyList;
 
 #ifdef ROIDSERVER_DASHBOARD
+  int dashboardPort;
   allowdeny_list_t dashboardAllowList;
   dashboard_connection_t dashboard[ROIDSERVER_MAX_CLIENTS];
   int dashboardFD;
@@ -313,7 +315,7 @@ network_closeSocket(int fd)
 
 
 static int
-network_serverTCP(int port)
+network_serverTCP(int port, char* address)
 {
   int socket_fd;
   struct sockaddr_in sa;
@@ -327,7 +329,7 @@ network_serverTCP(int port)
 
   memset(&sa, 0, sizeof(sa));
   sa.sin_family = AF_INET;
-  sa.sin_addr.s_addr = inet_addr("0.0.0.0");
+  sa.sin_addr.s_addr = inet_addr(address);
   sa.sin_port = htons(port);
 
   setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, (void*) &ONE, sizeof(ONE));
@@ -409,6 +411,29 @@ main_addToAllowDenyList(allowdeny_list_t* list, uint32_t addr, uint32_t mask)
   list->entries[list->num].addr = addr;
   list->entries[list->num].mask = mask;
   list->num++;
+}
+
+
+static void
+main_loadPort(void)
+{
+  const char* filename = "port.txt";
+
+  FILE* fp = fopen(filename, "r");
+  if (fp) {
+    if (fscanf(fp, "%d", &global.port) != 1) {
+      log_printf("unable to load port from %s\n", filename);
+      fclose(fp);
+      network_exit(1);
+    } else {
+#ifdef ROIDSERVER_DASHBOARD
+      global.dashboardPort = global.port + 1;
+#endif
+    }
+    fclose(fp);
+  } else {
+    log_printf("unable to open %s\n", filename);
+  }
 }
 
 
@@ -1374,6 +1399,7 @@ main(int argc, char** argv)
   WSAStartup(MAKEWORD(2,2), &wsaData);
 #endif
 
+  main_loadPort();
 
 #ifdef ROIDSERVER_DASHBOARD
   if (!dashboard_loadRootPath()) {
@@ -1388,7 +1414,7 @@ main(int argc, char** argv)
     global.dashboard[i].socketFD = -1;
   }
 
-  global.dashboardFD = network_serverTCP(ROIDSERVER_DASHBOARD_PORT);
+  global.dashboardFD = network_serverTCP(global.dashboardPort, "127.0.0.1");
   if (global.dashboardFD < 0) {
     network_exit(2);
   }
@@ -1396,7 +1422,7 @@ main(int argc, char** argv)
   main_loadDenyList();
 #endif
 
-  global.serverFD = network_serverTCP(ROIDSERVER_GAME_PORT);
+  global.serverFD = network_serverTCP(global.port, "0.0.0.0");
 
   if (global.serverFD < 0) {
     network_exit(2);
