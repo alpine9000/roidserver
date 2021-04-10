@@ -419,12 +419,12 @@ main_loadPort(void)
 {
   const char* filename = "port.txt";
 
+  global.port = 0;
+
   FILE* fp = fopen(filename, "r");
   if (fp) {
     if (fscanf(fp, "%d", &global.port) != 1) {
       log_printf("unable to load port from %s\n", filename);
-      fclose(fp);
-      network_exit(1);
     } else {
 #ifdef ROIDSERVER_DASHBOARD
       global.dashboardPort = global.port + 1;
@@ -433,6 +433,10 @@ main_loadPort(void)
     fclose(fp);
   } else {
     log_printf("unable to open %s\n", filename);
+  }
+
+  if (fp == 0 || global.port == 0) {
+    network_exit(1);
   }
 }
 
