@@ -1217,7 +1217,7 @@ network_processLag(int index)
   network_assertValidClient(index);
   global.clients[index].state++;
   global.clients[index].lag = htonl(*(uint32_t*)global.clients[index].buffer);
-  log_printf("%d: %x\n", index, global.clients[index].lag);
+  log_printf("%d: %x\n", index, ntohl(global.clients[index].lag));
 }
 
 

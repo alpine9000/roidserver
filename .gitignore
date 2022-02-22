@@ -1,6 +1,9 @@
+self.pem
 build
 password.txt
 allow.txt
 push.sh
 deny.txt
 port.txt
+websockify.log
+roid.log
