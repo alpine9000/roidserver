@@ -19,15 +19,14 @@ DEBUG_CFLAGS=-g $(STATIC_ANALYZE)
 OBJS=$(addprefix build/obj/, $(SRCS:.c=.o))
 CFLAGS=-O2 $(WARNINGS) $(DEBUG_CFLAGS)
 
-
 WIN32_OBJS=$(addprefix build/win32/, $(SRCS:.c=.o))
-WIN32_CC=/usr/local/mingw/bin/x86_64-w64-mingw32-gcc
+WIN32_CC=i686-w64-mingw32-gcc
 WIN32_CFLAGS=$(WARNINGS)
 WIN32_LIBS=-lws2_32
 
 AMIGA_OBJS=$(addprefix build/amiga/, $(SRCS:.c=.o))
 AMIGA_CC=/usr/local/amiga/bebbo/bin/m68k-amigaos-gcc
-AMIGA_CFLAGS=-O0 -DAMIGA -noixemul -fomit-frame-pointer
+AMIGA_CFLAGS=-Os -DAMIGA -noixemul -fomit-frame-pointer
 AMIGA_LDFLAGS=-s
 AMIGA_LIBS=-lamiga
 

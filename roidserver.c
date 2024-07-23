@@ -1,3 +1,4 @@
+#ifndef AMIGA
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
@@ -6,6 +7,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <stdint.h>
+#endif
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -23,31 +25,31 @@
 #include <unistd.h>
 #endif
 
-//#define AMIGA_GUI
 
 #ifdef AMIGA
 #include <proto/exec.h>
 #include <proto/socket.h>
 #define localtime_r(a, b) localtime(a)
-#ifdef AMIGA_GUI
-void
-amiga_cleanupGUI(void);
-void
-amiga_updateNumConnectedFighters(int num);
-#endif
 #endif
 
+#ifdef AMIGA
+#define ROIDSERVER_MAX_CLIENTS            2
+#define ROIDSERVER_NO_ALLOW_DENY_LISTS
+#else
 #define ROIDSERVER_DASHBOARD
+#define ROIDSERVER_MAX_CLIENTS            256
 #define ROIDSERVER_LOGGING
-#define ROIDSERVER_NUM_PING_PACKETS       8
-#define ROIDSERVER_MAX_CLIENTS            16
+#define ROIDSERVER_CONFIGURABLE_PORT
+#endif
 
+#define ROIDSERVER_NUM_PING_PACKETS       8
 
 #define ROIDSERVER_CACHE_TIMEOUT_SECONDS  (60*60*24*365)
 #define ROIDSERVER_READY_STATE            (ROIDSERVER_NUM_PING_PACKETS+1)
 #define ROIDSERVER_HTTP_REQUEST_SEPARATOR "\r\n\r\n"
 #define ROIDSERVER_XFF_HEADER             "X-Forwarded-For: "
 #define ROIDSERVER_ENABLE_PROXY           1
+
 //#define ROIDSERVER_ASSERTS
 //#define ROIDSERVER_MEASURE_TIME
 
@@ -171,9 +173,11 @@ typedef struct {
   int serverFD;
   int port;
 
-
   client_connection_t clients[ROIDSERVER_MAX_CLIENTS];
+
+#ifndef ROIDSERVER_NO_ALLOW_DENY_LISTS
   allowdeny_list_t denyList;
+#endif
 
 #ifdef ROIDSERVER_DASHBOARD
   int dashboardPort;
@@ -183,9 +187,8 @@ typedef struct {
   char rootPath[256];
 #endif
 
+#ifdef ROIDSERVER_LOGGING
   int loggingEnabled;
-#ifdef AMIGA_GUI
-  struct Window* window;
 #endif
 } global_t;
 
@@ -196,8 +199,7 @@ static const int ONE = 1;
 struct Library *SocketBase = 0;
 #endif
 
-#ifdef ROID_NEED_SAFE_STRING_FILLS
-
+#if defined(ROID_NEED_SAFE_STRING_FILLS) && defined(ROIDSERVER_DASHBOARD)
 #if defined(AMIGA) || (!defined(_WIN32) && (defined(__linux__) && _POSIX_C_SOURCE < 200809L))
 static int
 strnlen(const char *s, size_t max)
@@ -270,9 +272,6 @@ network_exit(int error)
   if (SocketBase) {
     CloseLibrary(SocketBase);
   }
-#ifdef AMIGA_GUI
-  amiga_cleanupGUI();
-#endif
 #endif
   exit(error);
 }
@@ -360,7 +359,7 @@ network_serverTCP(int port, char* address)
   return socket_fd;
 }
 
-#if defined(AMIGA_GUI) || defined(ROIDSERVER_DASHBOARD)
+#if defined(ROIDSERVER_DASHBOARD)
 static int
 network_numClientConnections(void)
 {
@@ -393,27 +392,11 @@ network_removeConnection(int index)
     log_printf("removing connection slot: %d\n", index);
     network_closeSocket(global.clients[index].socketFD);
   }
-
-#ifdef AMIGA_GUI
-  amiga_updateNumConnectedFighters(network_numClientConnections());
-#endif
 }
 
 
-static void
-main_addToAllowDenyList(allowdeny_list_t* list, uint32_t addr, uint32_t mask)
-{
-  if (list->size <= list->num) {
-    list->size = list->size ? list->size*2 : 16;
-    list->entries = realloc(list->entries, sizeof(list->entries[0])*list->size);
-  }
 
-  list->entries[list->num].addr = addr;
-  list->entries[list->num].mask = mask;
-  list->num++;
-}
-
-
+#ifdef ROIDSERVER_CONFIGURABLE_PORT
 static void
 main_loadPort(void)
 {
@@ -439,7 +422,29 @@ main_loadPort(void)
     network_exit(1);
   }
 }
+#endif
 
+#ifndef ROIDSERVER_NO_ALLOW_DENY_LISTS
+
+static int
+network_matchAddr(uint32_t addr1, uint32_t addr2, uint32_t mask) {
+  addr1 = htonl(addr1);
+  addr2 = htonl(addr2);
+  return (addr1 & mask) == (addr2 & mask);
+}
+
+static void
+main_addToAllowDenyList(allowdeny_list_t* list, uint32_t addr, uint32_t mask)
+{
+  if (list->size <= list->num) {
+    list->size = list->size ? list->size*2 : 16;
+    list->entries = realloc(list->entries, sizeof(list->entries[0])*list->size);
+  }
+
+  list->entries[list->num].addr = addr;
+  list->entries[list->num].mask = mask;
+  list->num++;
+}
 
 static int
 main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
@@ -487,15 +492,6 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
   return list->num > 0;
 }
 
-
-static int
-network_matchAddr(uint32_t addr1, uint32_t addr2, uint32_t mask) {
-  addr1 = htonl(addr1);
-  addr2 = htonl(addr2);
-  return (addr1 & mask) == (addr2 & mask);
-}
-
-
 static void
 main_loadDenyList(void)
 {
@@ -504,9 +500,22 @@ main_loadDenyList(void)
   }
 }
 
+#endif
+
+static char*
+network_ntoa(uint32_t addr)
+{
+#ifdef AMIGA
+  return Inet_NtoA(addr);
+#else
+  struct in_addr inAddr;
+  inAddr.s_addr = addr;
+  return inet_ntoa(inAddr);
+#endif
+}
+
 
 #ifdef ROIDSERVER_DASHBOARD
-
 
 static void
 dashboard_removeConnection(int index)
@@ -594,18 +603,6 @@ dashboard_renderDisconnectHTML(unsigned int dashboardIndex)
   }
 
   return result;
-}
-
-static char*
-network_ntoa(uint32_t addr)
-{
-#ifdef AMIGA
-  return Inet_NtoA(addr);
-#else
-  struct in_addr inAddr;
-  inAddr.s_addr = addr;
-  return inet_ntoa(inAddr);
-#endif
 }
 
 
@@ -1035,7 +1032,7 @@ dashboard_loadRootPath(void)
     }
     fclose(fp);
   } else {
-    log_printf("failed to open rootPath.txt: %s\n", log_getError());
+    log_printf("failed to open root.txt: %s\n", log_getError());
   }
 
   unsigned i;
@@ -1334,6 +1331,7 @@ network_addConnection(int socketFD)
 
   getpeername(socketFD, (struct sockaddr *)&addr, &addr_size);
 
+#ifndef ROIDSERVER_NO_ALLOW_DENY_LISTS
   for (i = 0; i < global.denyList.num; i++) {
     if (network_matchAddr(global.denyList.entries[i].addr, addr.sin_addr.s_addr, global.denyList.entries[i].mask)) {
       log_printf("%s: blocked connection (%x)\n", network_ntoa(addr.sin_addr.s_addr), addr.sin_addr.s_addr);
@@ -1341,20 +1339,19 @@ network_addConnection(int socketFD)
       return;
     }
   }
-
+#endif
+  
   for (i = 0; i < countof(global.clients); i++) {
     if (global.clients[i].id == 0) {
       memset(&global.clients[i], 0, sizeof(global.clients[i]));
       global.clients[i].id = 1;
       global.clients[i].socketFD = socketFD;
       global.clients[i].addr = addr;
+#ifdef ROIDSERVER_DASHBOARD
       time(&global.clients[i].connected);
       strlcpy(global.clients[i].ip, network_ntoa(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
-      log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
-#ifdef AMIGA_GUI
-      amiga_updateNumConnectedFighters(network_numClientConnections());
 #endif
-
+      log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
       return;
     }
   }
@@ -1363,19 +1360,16 @@ network_addConnection(int socketFD)
   log_printf("no free slots\n");
 }
 
-
-#ifdef AMIGA_GUI
-#include "amigagui.c"
-#endif
-
 int
 main(int argc, char** argv)
 {
+#ifdef ROIDSERVER_LOGGING
   global.loggingEnabled = 1;
 
   if (argc == 2) {
     global.loggingEnabled = !(strcmp(argv[1], "--quiet") == 0);
   }
+#endif
 
 #ifdef AMIGA
   SocketBase = OpenLibrary((APTR)"bsdsocket.library", 4);
@@ -1383,9 +1377,6 @@ main(int argc, char** argv)
   if (!SocketBase) {
     network_exit(1);
   }
-#ifdef AMIGA_GUI
-  amiga_openWindow();
-#endif
 #endif
 
 #ifdef _WIN32
@@ -1393,7 +1384,11 @@ main(int argc, char** argv)
   WSAStartup(MAKEWORD(2,2), &wsaData);
 #endif
 
+#ifdef ROIDSERVER_CONFIGURABLE_PORT
   main_loadPort();
+#else
+  global.port = 9000;  
+#endif
 
 #ifdef ROIDSERVER_DASHBOARD
   if (!dashboard_loadRootPath()) {
@@ -1413,7 +1408,9 @@ main(int argc, char** argv)
     network_exit(2);
   }
 #else
+#ifndef ROIDSERVER_NO_ALLOW_DENY_LISTS  
   main_loadDenyList();
+#endif
 #endif
 
   global.serverFD = network_serverTCP(global.port, "0.0.0.0");
@@ -1432,18 +1429,7 @@ main(int argc, char** argv)
 
 #ifdef AMIGA
     ULONG signals = 0;
-#ifdef AMIGA_GUI
-    signals |= 1 << global.window->UserPort->mp_SigBit;
-#endif
     int task = WaitSelect(maxFD + 1, &read_fds, NULL, NULL, NULL, &signals);
-#ifdef AMIGA_GUI
-    if (signals && 1 << global.window->UserPort->mp_SigBit) {
-      int done = handleIDCMP(global.window, 0);
-      if (done) {
-	network_exit(0);
-      }
-    }
-#endif
 #else
     int task = select(maxFD + 1, &read_fds, NULL, NULL, NULL);
 #endif
