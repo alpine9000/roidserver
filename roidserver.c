@@ -390,14 +390,22 @@ network_removeConnection(int index)
   if (id != 0) {
     for (i = 0; i < countof(global.clients); i++) {
       if (id == global.clients[i].id) {
-	log_printf("removing connection slot: %d\n", i);
-	network_closeSocket(global.clients[i].socketFD);
-	global.clients[i].id = 0;
+	if (global.clients[i].socketFD != -1) {	
+	  log_printf("removing connection slot: %d\n", i);
+	  network_closeSocket(global.clients[i].socketFD);
+	  global.clients[i].id = 0;
+	  global.clients[i].socketFD = -1;
+	} else {
+	  log_printf("not removing connection slot: %d (not connected?)\n", i);
+	}
       }
     }
-  } else {
+  } else if (global.clients[index].socketFD != -1) {
     log_printf("removing connection slot: %d\n", index);
     network_closeSocket(global.clients[index].socketFD);
+    global.clients[index].socketFD = -1;    
+  } else {
+    log_printf("not removing connection slot: %d (not connected?)\n", index);
   }
 }
 
@@ -602,9 +610,13 @@ dashboard_renderDisconnectHTML(unsigned int dashboardIndex)
 
   if (ptr) {
     ptr += strlen("disconnect/");
-    int i;
+    unsigned int i;
     if (sscanf(ptr, "%d", &i) == 1) {
-      network_removeConnection(i);
+      if (i < countof(global.clients)) {      
+	network_removeConnection(i);
+      } else {
+	log_printf("invalid client index %d\n", i);
+      }
     }
   }
 
@@ -1411,10 +1423,10 @@ main(int argc, char** argv)
 
   dashboard_renderReloadHTML(0); // load configuration
 
-  unsigned int i;
-  for (i = 0; i < countof(global.dashboard); i++) {
+  for (unsigned i = 0; i < countof(global.dashboard); i++) {
     global.dashboard[i].socketFD = -1;
   }
+
 
   global.dashboardFD = network_serverTCP(global.dashboardPort, "127.0.0.1");
   if (global.dashboardFD < 0) {
@@ -1426,6 +1438,11 @@ main(int argc, char** argv)
 #endif
 #endif
 
+
+  for (unsigned i = 0; i < countof(global.clients); i++) {
+    global.clients[i].socketFD = -1;
+  }  
+  
   global.serverFD = network_serverTCP(global.port, "0.0.0.0");
 
   if (global.serverFD < 0) {
