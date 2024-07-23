@@ -38,6 +38,7 @@
 #else
 #define ROIDSERVER_DASHBOARD
 #define ROIDSERVER_MAX_CLIENTS            256
+#define ROIDSERVER_MAX_DASHBOARD_CLIENTS  8
 #define ROIDSERVER_LOGGING
 #define ROIDSERVER_CONFIGURABLE_PORT
 #endif
@@ -74,7 +75,7 @@
 #endif
 
 
-int
+static int
 _inet_aton(const char *cp, struct in_addr *addr)
 {
   addr->s_addr = inet_addr((char*)cp);
@@ -83,7 +84,7 @@ _inet_aton(const char *cp, struct in_addr *addr)
 
 
 #ifdef _WIN32
-const char*
+static const char*
 _w32_getError(void)
 {
   if (errno) {
@@ -137,29 +138,30 @@ typedef struct {
   int socketFD;
   uint32_t id;
   uint32_t state;
-  char buffer[255];
   int bufferIndex;
   struct sockaddr_in addr;
-  time_t connected;
   uint32_t lag;
   uint32_t networkPlayer;
-  char ip[20];    
 #ifdef ROIDSERVER_DASHBOARD
+  char ip[20];      
+  time_t connected;
   int sent;
   int recv;
 #endif
+  char buffer[255];  
 } client_connection_t;
 
 #ifdef ROIDSERVER_DASHBOARD
 typedef struct {
   int socketFD;
-  char buffer[4096];
   int bufferIndex;
-  char ip[20];
   int proxy;
+  char ip[20];  
+  char buffer[4096];  
 } dashboard_connection_t;
 #endif
 
+#ifndef ROIDSERVER_NO_ALLOW_DENY_LISTS
 typedef struct {
   uint32_t addr;
   uint32_t mask;
@@ -170,28 +172,30 @@ typedef struct {
   unsigned int num;
   unsigned int size;
 } allowdeny_list_t;
+#endif
 
 typedef struct {
   int serverFD;
   int port;
 
-  client_connection_t clients[ROIDSERVER_MAX_CLIENTS];
-
 #ifndef ROIDSERVER_NO_ALLOW_DENY_LISTS
   allowdeny_list_t denyList;
 #endif
 
+#ifdef ROIDSERVER_LOGGING
+  int loggingEnabled;
+#endif  
+  
 #ifdef ROIDSERVER_DASHBOARD
   int dashboardPort;
   allowdeny_list_t dashboardAllowList;
-  dashboard_connection_t dashboard[ROIDSERVER_MAX_CLIENTS];
+  dashboard_connection_t dashboard[ROIDSERVER_MAX_DASHBOARD_CLIENTS];
   int dashboardFD;
   char rootPath[256];
 #endif
 
-#ifdef ROIDSERVER_LOGGING
-  int loggingEnabled;
-#endif
+  client_connection_t clients[ROIDSERVER_MAX_CLIENTS];  
+
 } global_t;
 
 
@@ -249,7 +253,7 @@ _strnlen(char *s, size_t max)
 }
 
 
-int
+static int
 _strlcat(char *dest, char *src, int maxlen)
 {
   int srcLen = strlen(src);
@@ -593,7 +597,7 @@ dashboard_renderDisconnectHTML(unsigned int dashboardIndex)
 {
   network_assertValidDashboard(dashboardIndex);
 
-  static char* result = "OK";
+  static const char* result = "OK";
   char* ptr = http_matchRequest(dashboardIndex, "disconnect/", sizeof("disconnect/"));
 
   if (ptr) {
@@ -637,7 +641,7 @@ dashboard_renderBanHTML(unsigned int dashboardIndex)
 {
   network_assertValidDashboard(dashboardIndex);
 
-  static char* result = "OK";
+  static const char* result = "OK";
   char* ptr = http_matchRequest(dashboardIndex, "ban/", sizeof("ban/"));
 
   if (ptr) {
@@ -664,7 +668,7 @@ dashboard_renderReloadHTML(unsigned int dashboardIndex)
 {
   network_assertValidDashboard(dashboardIndex);
 
-  static char* buffer = "OK";
+  static const char* buffer = "OK";
 
   if (!main_loadAllowDenyList(&global.dashboardAllowList, "allow.txt")) {
     log_printf("WARNING: failed to load allow list\n");
@@ -685,7 +689,7 @@ static const char*
 dashboard_renderResetHTML(unsigned int dashboardIndex)
 {
   network_assertValidDashboard(dashboardIndex);
-  static char* buffer = "OK";
+  static const char* buffer = "OK";
 
   unsigned int i;
   for (i = 0; i < countof(global.clients); i++) {
@@ -1099,11 +1103,7 @@ network_accept(int serverFD)
      accept_fd = accept(serverFD, (struct sockaddr*)&isa, &addr_size);
   } while (accept_fd == -1);
   if (accept_fd < 0 ) {
-    if (accept_fd < 0) {
-      log_printf("accept() failed: %s\n", log_getError());
-    } else {
-      network_closeSocket(accept_fd);
-    }
+    log_printf("accept() failed: %s\n", log_getError());
     network_closeSocket(serverFD);
     return -1;
   }
