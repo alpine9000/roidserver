@@ -140,12 +140,14 @@ typedef struct {
   char buffer[255];
   int bufferIndex;
   struct sockaddr_in addr;
-  char ip[20];
   time_t connected;
   uint32_t lag;
+  uint32_t networkPlayer;
+  char ip[20];    
+#ifdef ROIDSERVER_DASHBOARD
   int sent;
   int recv;
-  uint32_t networkPlayer;
+#endif
 } client_connection_t;
 
 #ifdef ROIDSERVER_DASHBOARD
@@ -201,6 +203,7 @@ struct Library *SocketBase = 0;
 
 #if defined(ROID_NEED_SAFE_STRING_FILLS) && defined(ROIDSERVER_DASHBOARD)
 #if defined(AMIGA) || (!defined(_WIN32) && (defined(__linux__) && _POSIX_C_SOURCE < 200809L))
+
 static int
 strnlen(const char *s, size_t max)
 {
@@ -451,18 +454,17 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
 {
   FILE* fp = fopen(filename, "r");
   char line[256];
-  char* ptr;
 
   list->size = 0;
   list->num = 0;
   list->entries = 0;
 
   if (fp) {
-    while ((ptr = fgets(line, sizeof(line), fp))) {
+    while (fgets(line, sizeof(line), fp)) {
       line[strcspn(line, "\n")] = 0;
       char* mask = strstr(line, "/");
       uint32_t maskAddr;
-	uint32_t ipAddr;
+      uint32_t ipAddr;
 
       if (mask != NULL) {
 	mask++;
@@ -780,20 +782,23 @@ http_sendFile(int i, const char* filename, const char* contentType, int cacheSec
   int found = 0;
 
   struct stat st;
-  if (stat(filename, &st) == 0) {
-    char* buffer = malloc(st.st_size+1);
-    if (buffer) {
-      int fd = open(filename, O_RDONLY);
-      if (fd >= 0) {
-	int len = read(fd, buffer, st.st_size);
-	if (len) {
-	  buffer[len] = 0;
-	  http_sendResponse(i, 200, "OK", contentType, cacheSeconds, buffer, len);
-	  found = 1;
+  int fd = open(filename, O_RDONLY);  
+  if (fd >= 0) {
+    if (fstat(fd, &st) == 0) {
+      char* buffer = malloc(st.st_size+1);
+      if (buffer) {
+	
+	if (fd >= 0) {
+	  int len = read(fd, buffer, st.st_size);
+	  if (len) {
+	    buffer[len] = 0;
+	    http_sendResponse(i, 200, "OK", contentType, cacheSeconds, buffer, len);
+	    found = 1;
+	  }
+	  close(fd);
 	}
-	close(fd);
+	free(buffer);
       }
-      free(buffer);
     }
   }
 
@@ -876,9 +881,7 @@ http_matchWildcard(unsigned int dashboardIndex, const char* path)
 {
   network_assertValidDashboard(dashboardIndex);
 
-  char* ptr;
-
-  if ((ptr = http_matchRequest(dashboardIndex, "GET ", sizeof("GET "))) != NULL) {
+  if (http_matchRequest(dashboardIndex, "GET ", sizeof("GET ")) != NULL) {
     return  http_matchRequest(dashboardIndex, path, strlen(path)) != NULL;
   }
 
@@ -1158,6 +1161,10 @@ network_getPacket(int index)
     global.clients[index].buffer[d++] = global.clients[index].buffer[s++];
   }
   global.clients[index].bufferIndex -= 4;
+  if (global.clients[index].bufferIndex < 0) {
+    /* this should not be possible */
+    global.clients[index].bufferIndex = 0;
+  }
   return packet;
 }
 
@@ -1179,11 +1186,15 @@ network_processId(int index)
 static int
 network_send(int clientIndex, void* data, int len)
 {
+  network_assertValidClient(clientIndex);
+  
   if (send(global.clients[clientIndex].socketFD, data, len, MSG_DONTWAIT) != len) {
     log_printf("failed\n");
     network_removeConnection(clientIndex);
   } else {
+#ifdef ROIDSERVER_DASHBOARD
     global.clients[clientIndex].sent += len;
+#endif
     return len;
   }
 
@@ -1259,7 +1270,9 @@ network_processClientData(fd_set *read_fds)
       do {
 	int len = recv(global.clients[i].socketFD, &global.clients[i].buffer[global.clients[i].bufferIndex], 1, MSG_DONTWAIT);
 	if (len > 0) {
-	  global.clients[i].recv++;
+#ifdef ROIDSERVER_DASHBOARD
+          global.clients[i].recv++;
+#endif
 	  if (global.clients[i].bufferIndex < (int)(countof(global.clients[i].buffer)-1)) {
 	    global.clients[i].bufferIndex++;
 	  } else {
