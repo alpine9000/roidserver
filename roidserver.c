@@ -51,6 +51,15 @@
 #define ROIDSERVER_XFF_HEADER             "X-Forwarded-For: "
 #define ROIDSERVER_ENABLE_PROXY           1
 
+#define ROIDSERVER_ALLOY_LIST_FILENAME    "allow.txt"
+#define ROIDSERVER_DENT_LIST_FILENAME     "deny.txt"
+#define ROIDSERVER_ROOT_PATH_FILENAME     "root.txt"
+#define ROIDSERVER_PORTS_FILENAME         "ports.txt"
+
+#define ROIDSERVER_DASHBOARD_LISTEN_ADDR  "127.0.0.1"
+#define ROIDSERVER_NETWORK_PORT           9000
+#define ROIDSERVER_NETWORK_DASHBOARD_PORT 9001
+
 //#define ROIDSERVER_ASSERTS
 //#define ROIDSERVER_MEASURE_TIME
 
@@ -239,35 +248,35 @@ _strlcpy(char* dest, char* src, int max)
 
 
 static int
-_strnlen(char *s, size_t max)
-{
-  unsigned int i;
-
-  for (i = 0; i < max; i++, s++) {
-    if (*s == 0) {
-      break;
-    }
-  }
-
-  return (i);
-}
-
-
-static int
 _strlcat(char *dest, char *src, int maxlen)
 {
-  int srcLen = strlen(src);
-  int destLen = _strnlen(dest, maxlen);
-  if (destLen == maxlen) {
-    return destLen+srcLen;
+  char *d = dest;
+  char *s = src;
+  unsigned int n = maxlen;
+  unsigned int destLen;
+   
+  while (n-- != 0 && *d != '\0') {
+    d++;
   }
-  if (srcLen < maxlen-destLen) {
-    memcpy(dest+destLen, src, srcLen+1);
-  } else {
-    memcpy(dest+destLen, src, maxlen-1);
-    dest[destLen+maxlen-1] = 0;
+  
+  destLen = d - dest;
+  n = maxlen - destLen;
+  
+  if (n == 0) {
+    return (destLen + strlen(s));
   }
-  return destLen + srcLen;
+  
+  while (*s) {
+    if (n != 1)	{
+      *d++ = *s;
+      n--;
+    }
+    s++;
+  }
+
+  *d = 0;
+  
+  return (destLen + (s - src));  /* count does not include NUL */
 }
 #endif
 
@@ -415,27 +424,25 @@ network_removeConnection(int index)
 static void
 main_loadPort(void)
 {
-  const char* filename = "port.txt";
+  const char* filename = ROIDSERVER_PORTS_FILENAME;
 
-  global.port = 0;
-
+  global.port = ROIDSERVER_NETWORK_PORT;
+  global.dashboardPort = ROIDSERVER_NETWORK_DASHBOARD_PORT;
+  
   FILE* fp = fopen(filename, "r");
   if (fp) {
     if (fscanf(fp, "%d", &global.port) != 1) {
-      log_printf("unable to load port from %s\n", filename);
-    } else {
-#ifdef ROIDSERVER_DASHBOARD
-      global.dashboardPort = global.port + 1;
-#endif
+      log_printf("WARNING: failed to load port from [%s]\n", filename);
     }
+    if (fscanf(fp, "%d", &global.dashboardPort) != 1) {
+      log_printf("WARNING: failed to load dashboard port from [%s]\n", filename);
+    }     
     fclose(fp);
   } else {
-    log_printf("unable to open %s\n", filename);
+    log_printf("failed to open [%s] (%s)\n", filename, log_getError());
   }
 
-  if (fp == 0 || global.port == 0) {
-    network_exit(1);
-  }
+  log_printf("listen port: %d, dashboard port: %d\n", global.port, global.dashboardPort);
 }
 #endif
 
@@ -500,7 +507,7 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
 
     fclose(fp);
   } else {
-    log_printf("[%s] failed to open (%s)\n", filename, log_getError());
+    log_printf("WARNING: failed to open [%s] (%s)\n", filename, log_getError());
   }
 
   return list->num > 0;
@@ -509,9 +516,7 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
 static void
 main_loadDenyList(void)
 {
-  if (!main_loadAllowDenyList(&global.denyList, "deny.txt")) {
-    log_printf("WARNING: failed to load deny list\n");
-  }
+  main_loadAllowDenyList(&global.denyList, ROIDSERVER_DENT_LIST_FILENAME);
 }
 
 #endif
@@ -628,7 +633,7 @@ static void
 main_appendToDenyFile(unsigned int i)
 {
   network_assertValidClient(i);
-  FILE* fp = fopen("deny.txt", "a");
+  FILE* fp = fopen(ROIDSERVER_DENT_LIST_FILENAME, "a");
   int ok = 0;
 
   if (fp) {
@@ -638,12 +643,12 @@ main_appendToDenyFile(unsigned int i)
     ok = fwrite(addr, strlen(addr), 1, fp) == 1 && fwrite("\n", strlen("\n"), 1, fp) == 1;
 
     if (!ok) {
-      log_printf("failed to append %s to deny list\n", addr);
+      log_printf("WARNING: failed to append %s to deny list ["ROIDSERVER_DENT_LIST_FILENAME"]\n", addr);
     }
 
     fclose(fp);
   } else {
-    log_printf("failed to open deny list\n");
+    log_printf("WARNING: failed to open deny list ["ROIDSERVER_DENT_LIST_FILENAME"]\n");
   }
 }
 
@@ -682,8 +687,11 @@ dashboard_renderReloadHTML(unsigned int dashboardIndex)
 
   static const char* buffer = "OK";
 
-  if (!main_loadAllowDenyList(&global.dashboardAllowList, "allow.txt")) {
-    log_printf("WARNING: failed to load allow list\n");
+  main_loadAllowDenyList(&global.dashboardAllowList, ROIDSERVER_ALLOY_LIST_FILENAME);
+
+  if (!strcmp(ROIDSERVER_DASHBOARD_LISTEN_ADDR, "127.0.0.1")) {
+    log_printf("allowing dashboard connections from 127.0.0.1\n");
+    main_addToAllowDenyList(&global.dashboardAllowList, inet_addr("127.0.0.1"), 0xFFFFFFFF);
   }
 
   main_loadDenyList();
@@ -844,7 +852,7 @@ http_matchPath(int dashboardIndex, const char* path)
   network_assertValidDashboard(dashboardIndex);
 
   static char buffer[1024];
-  snprintf(buffer, sizeof(buffer), "GET /%s/%s", global.rootPath, path);
+  snprintf(buffer, sizeof(buffer), "GET /%s%s", global.rootPath, path);
   return http_matchRequest(dashboardIndex, buffer, sizeof(buffer));
 }
 
@@ -1040,7 +1048,7 @@ network_addDashboardConnection(int socketFD)
 static int
 dashboard_loadRootPath(void)
 {
-  FILE* fp = fopen("root.txt", "r");
+  FILE* fp = fopen(ROIDSERVER_ROOT_PATH_FILENAME, "r");
   int success = 0;
 
   memset(global.rootPath, 0, sizeof(global.rootPath));
@@ -1051,7 +1059,7 @@ dashboard_loadRootPath(void)
     }
     fclose(fp);
   } else {
-    log_printf("failed to open root.txt: %s\n", log_getError());
+    log_printf("WARNING: failed to open ["ROIDSERVER_ROOT_PATH_FILENAME"]: (%s)\n", log_getError());
   }
 
   unsigned i;
@@ -1067,6 +1075,10 @@ dashboard_loadRootPath(void)
       global.rootPath[i] = 0;
     }
   }
+
+  if (strnlen(global.rootPath, sizeof(global.rootPath))) {
+    strlcat(global.rootPath, "/", sizeof(global.rootPath));
+  }    
 
   return success;
 }
@@ -1186,10 +1198,9 @@ network_processId(int index)
 {
   network_assertValidClient(index);
   uint32_t packet = network_getPacket(index);
-  log_printf("%d: %x\n", index, packet);
   global.clients[index].state++;
   if (!network_setId(index, packet)) {
-    log_printf("failed\n");
+    log_printf("failed (id already in use)\n");
     network_removeConnection(index);
   }
 }
@@ -1221,11 +1232,10 @@ network_processPing(int index)
   uint32_t packet = network_getPacket(index);
   if (packet == 0xdeadbeef) {
     global.clients[index].state++;
-    log_printf("%d: %x networkPlayer: %d\n", index, packet, global.clients[index].networkPlayer);
     uint32_t networkPlayer = htonl(global.clients[index].networkPlayer);
     network_send(index, (void*)&networkPlayer, sizeof(networkPlayer));
   } else {
-    log_printf("failed\n");
+    log_printf("%d: invalid token: %x => disconnecting...\n", index, packet);    
     network_removeConnection(index);
   }
 }
@@ -1412,14 +1422,11 @@ main(int argc, char** argv)
 #ifdef ROIDSERVER_CONFIGURABLE_PORT
   main_loadPort();
 #else
-  global.port = 9000;  
+  global.port = ROIDSERVER_NETWORK_PORT;  
 #endif
 
 #ifdef ROIDSERVER_DASHBOARD
-  if (!dashboard_loadRootPath()) {
-    log_printf("failed to load root\n");
-    return 1;
-  }
+  dashboard_loadRootPath();
 
   dashboard_renderReloadHTML(0); // load configuration
 

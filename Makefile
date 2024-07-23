@@ -22,7 +22,7 @@ LDFLAGS=-s
 
 WIN32_OBJS=$(addprefix build/win32/, $(SRCS:.c=.o))
 WIN32_CC=i686-w64-mingw32-gcc
-WIN32_CFLAGS=$(WARNINGS)
+WIN32_CFLAGS=-O2 $(WARNINGS)
 WIN32_LIBS=-lws2_32
 
 AMIGA_OBJS=$(addprefix build/amiga/, $(SRCS:.c=.o))
