@@ -23,31 +23,29 @@
 #include <unistd.h>
 #endif
 
-//#define AMIGA_GUI
 
 #ifdef AMIGA
 #include <proto/exec.h>
 #include <proto/socket.h>
 #define localtime_r(a, b) localtime(a)
-#ifdef AMIGA_GUI
-void
-amiga_cleanupGUI(void);
-void
-amiga_updateNumConnectedFighters(int num);
-#endif
 #endif
 
+#ifdef AMIGA
+#define ROIDSERVER_MAX_CLIENTS            2
+#else
 #define ROIDSERVER_DASHBOARD
+#define ROIDSERVER_MAX_CLIENTS            256
 #define ROIDSERVER_LOGGING
-#define ROIDSERVER_NUM_PING_PACKETS       8
-#define ROIDSERVER_MAX_CLIENTS            16
+#endif
 
+#define ROIDSERVER_NUM_PING_PACKETS       8
 
 #define ROIDSERVER_CACHE_TIMEOUT_SECONDS  (60*60*24*365)
 #define ROIDSERVER_READY_STATE            (ROIDSERVER_NUM_PING_PACKETS+1)
 #define ROIDSERVER_HTTP_REQUEST_SEPARATOR "\r\n\r\n"
 #define ROIDSERVER_XFF_HEADER             "X-Forwarded-For: "
 #define ROIDSERVER_ENABLE_PROXY           1
+
 //#define ROIDSERVER_ASSERTS
 //#define ROIDSERVER_MEASURE_TIME
 
@@ -171,7 +169,6 @@ typedef struct {
   int serverFD;
   int port;
 
-
   client_connection_t clients[ROIDSERVER_MAX_CLIENTS];
   allowdeny_list_t denyList;
 
@@ -184,9 +181,6 @@ typedef struct {
 #endif
 
   int loggingEnabled;
-#ifdef AMIGA_GUI
-  struct Window* window;
-#endif
 } global_t;
 
 
@@ -270,9 +264,6 @@ network_exit(int error)
   if (SocketBase) {
     CloseLibrary(SocketBase);
   }
-#ifdef AMIGA_GUI
-  amiga_cleanupGUI();
-#endif
 #endif
   exit(error);
 }
@@ -360,7 +351,7 @@ network_serverTCP(int port, char* address)
   return socket_fd;
 }
 
-#if defined(AMIGA_GUI) || defined(ROIDSERVER_DASHBOARD)
+#if defined(ROIDSERVER_DASHBOARD)
 static int
 network_numClientConnections(void)
 {
@@ -393,10 +384,6 @@ network_removeConnection(int index)
     log_printf("removing connection slot: %d\n", index);
     network_closeSocket(global.clients[index].socketFD);
   }
-
-#ifdef AMIGA_GUI
-  amiga_updateNumConnectedFighters(network_numClientConnections());
-#endif
 }
 
 
@@ -504,9 +491,20 @@ main_loadDenyList(void)
   }
 }
 
+static char*
+network_ntoa(uint32_t addr)
+{
+#ifdef AMIGA
+  return Inet_NtoA(addr);
+#else
+  struct in_addr inAddr;
+  inAddr.s_addr = addr;
+  return inet_ntoa(inAddr);
+#endif
+}
+
 
 #ifdef ROIDSERVER_DASHBOARD
-
 
 static void
 dashboard_removeConnection(int index)
@@ -594,18 +592,6 @@ dashboard_renderDisconnectHTML(unsigned int dashboardIndex)
   }
 
   return result;
-}
-
-static char*
-network_ntoa(uint32_t addr)
-{
-#ifdef AMIGA
-  return Inet_NtoA(addr);
-#else
-  struct in_addr inAddr;
-  inAddr.s_addr = addr;
-  return inet_ntoa(inAddr);
-#endif
 }
 
 
@@ -1035,7 +1021,7 @@ dashboard_loadRootPath(void)
     }
     fclose(fp);
   } else {
-    log_printf("failed to open rootPath.txt: %s\n", log_getError());
+    log_printf("failed to open root.txt: %s\n", log_getError());
   }
 
   unsigned i;
@@ -1351,10 +1337,6 @@ network_addConnection(int socketFD)
       time(&global.clients[i].connected);
       strlcpy(global.clients[i].ip, network_ntoa(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
       log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
-#ifdef AMIGA_GUI
-      amiga_updateNumConnectedFighters(network_numClientConnections());
-#endif
-
       return;
     }
   }
@@ -1362,11 +1344,6 @@ network_addConnection(int socketFD)
   network_closeSocket(socketFD);
   log_printf("no free slots\n");
 }
-
-
-#ifdef AMIGA_GUI
-#include "amigagui.c"
-#endif
 
 int
 main(int argc, char** argv)
@@ -1383,9 +1360,6 @@ main(int argc, char** argv)
   if (!SocketBase) {
     network_exit(1);
   }
-#ifdef AMIGA_GUI
-  amiga_openWindow();
-#endif
 #endif
 
 #ifdef _WIN32
@@ -1432,18 +1406,7 @@ main(int argc, char** argv)
 
 #ifdef AMIGA
     ULONG signals = 0;
-#ifdef AMIGA_GUI
-    signals |= 1 << global.window->UserPort->mp_SigBit;
-#endif
     int task = WaitSelect(maxFD + 1, &read_fds, NULL, NULL, NULL, &signals);
-#ifdef AMIGA_GUI
-    if (signals && 1 << global.window->UserPort->mp_SigBit) {
-      int done = handleIDCMP(global.window, 0);
-      if (done) {
-	network_exit(0);
-      }
-    }
-#endif
 #else
     int task = select(maxFD + 1, &read_fds, NULL, NULL, NULL);
 #endif
