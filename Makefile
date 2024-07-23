@@ -40,7 +40,7 @@ build/obj/%.o: %.c $(HEADERS) $(COMMON_DEPS)
 	@mkdir -p build/obj
 	$(CC) -c $(CFLAGS) $*.c -o build/obj/$*.o
 
-build/amiga/%.o: %.c $(HEADERS) $(COMMON_DEPS) amigagui.c
+build/amiga/%.o: %.c $(HEADERS) $(COMMON_DEPS) 
 	@mkdir -p build/amiga
 	$(AMIGA_CC) -c $(AMIGA_CFLAGS) $*.c -o build/amiga/$*.o
 
