@@ -405,7 +405,7 @@ static int
 network_isIgnoredAddr(uint32_t addr)
 {
   for (size_t i = 0; i < global.ignoreList.num; i++) {
-    if (network_matchAddr(global.dashboardAllowList.entries[i].addr, addr, global.dashboardAllowList.entries[i].mask)) {
+    if (network_matchAddr(global.ignoreList.entries[i].addr, addr, global.ignoreList.entries[i].mask)) {
       return 1;
     }
   }
