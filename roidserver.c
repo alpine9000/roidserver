@@ -400,6 +400,19 @@ network_matchAddr(uint32_t addr1, uint32_t addr2, uint32_t mask) {
   return (addr1 & mask) == (addr2 & mask);
 }
 
+#ifdef ROIDSERVER_LOGGING
+static int
+network_isIgnoredAddr(uint32_t addr)
+{
+  for (size_t i = 0; i < global.ignoreList.num; i++) {
+    if (network_matchAddr(global.dashboardAllowList.entries[i].addr, addr, global.dashboardAllowList.entries[i].mask)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+#endif
+
 static void
 network_removeConnection(int index)
 {
@@ -411,9 +424,9 @@ network_removeConnection(int index)
       if (id == global.clients[i].id) {
 	if (global.clients[i].socketFD != -1) {
 #ifdef ROIDSERVER_LOGGING
-	  if (!network_matchAddr(global.ignoreList.entries[i].addr, global.clients[i].addr.sin_addr.s_addr, global.ignoreList.entries[i].mask)) {	  
-	      log_printf("removing connection slot: %d\n", i);
-	    }
+	  if (!network_isIgnoredAddr(global.clients[i].addr.sin_addr.s_addr)) {	  
+	    log_printf("removing connection slot: %d\n", i);
+	  }
 #endif
 	  network_closeSocket(global.clients[i].socketFD);
 	  global.clients[i].id = 0;
@@ -425,7 +438,7 @@ network_removeConnection(int index)
     }
   } else if (global.clients[index].socketFD != -1) {
 #ifdef ROIDSERVER_LOGGING    
-    if (!network_matchAddr(global.ignoreList.entries[index].addr, global.clients[index].addr.sin_addr.s_addr, global.ignoreList.entries[index].mask)) {    
+    if (!network_isIgnoredAddr(global.clients[index].addr.sin_addr.s_addr)) {	        
       log_printf("removing connection slot: %d\n", index);
     }
 #endif
@@ -1327,8 +1340,7 @@ network_processClientData(fd_set *read_fds)
 	} else {
 	  if (len == 0) {
 #ifdef ROIDSERVER_LOGGING	    
-	    if (!network_matchAddr(global.ignoreList.entries[i].addr, global.clients[i].addr.sin_addr.s_addr, global.ignoreList.entries[i].mask)) {
-	      
+	    if (!network_isIgnoredAddr(global.clients[i].addr.sin_addr.s_addr)) {	  	      
 	      log_printf("failed: %s\n", log_getError());
 	    }
 #endif
