@@ -1426,7 +1426,7 @@ network_addConnection(int socketFD)
       strlcpy(global.clients[i].ip, network_ntoa(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
 #endif
 #ifdef ROIDSERVER_LOGGING
-      if (!network_matchAddr(global.ignoreList.entries[i].addr, addr.sin_addr.s_addr, global.ignoreList.entries[i].mask)) {
+      if (!network_isIgnoredAddr(global.clients[i].addr.sin_addr.s_addr)) {	  
 	log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
       }
 #endif
@@ -1477,7 +1477,6 @@ main(int argc, char** argv)
     global.dashboard[i].socketFD = -1;
   }
 
-
   global.dashboardFD = network_serverTCP(global.dashboardPort, "127.0.0.1");
   if (global.dashboardFD < 0) {
     network_exit(2);
@@ -1485,6 +1484,9 @@ main(int argc, char** argv)
 #else
 #ifndef ROIDSERVER_NO_ALLOW_DENY_LISTS  
   main_loadDenyList();
+#endif
+#ifdef ROIDSERVER_LOGGING
+  main_loadIngoreList();
 #endif
 #endif
 
