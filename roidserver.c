@@ -52,7 +52,8 @@
 #define ROIDSERVER_ENABLE_PROXY           1
 
 #define ROIDSERVER_ALLOY_LIST_FILENAME    "allow.txt"
-#define ROIDSERVER_DENT_LIST_FILENAME     "deny.txt"
+#define ROIDSERVER_DENY_LIST_FILENAME     "deny.txt"
+#define ROIDSERVER_IGNORE_LIST_FILENAME   "ignore.txt"
 #define ROIDSERVER_ROOT_PATH_FILENAME     "root.txt"
 #define ROIDSERVER_PORTS_FILENAME         "ports.txt"
 
@@ -193,6 +194,7 @@ typedef struct {
 
 #ifdef ROIDSERVER_LOGGING
   int loggingEnabled;
+  allowdeny_list_t ignoreList;
 #endif  
   
 #ifdef ROIDSERVER_DASHBOARD
@@ -390,6 +392,14 @@ network_numClientConnections(void)
 }
 #endif
 
+
+static int
+network_matchAddr(uint32_t addr1, uint32_t addr2, uint32_t mask) {
+  addr1 = htonl(addr1);
+  addr2 = htonl(addr2);
+  return (addr1 & mask) == (addr2 & mask);
+}
+
 static void
 network_removeConnection(int index)
 {
@@ -399,8 +409,12 @@ network_removeConnection(int index)
   if (id != 0) {
     for (i = 0; i < countof(global.clients); i++) {
       if (id == global.clients[i].id) {
-	if (global.clients[i].socketFD != -1) {	
-	  log_printf("removing connection slot: %d\n", i);
+	if (global.clients[i].socketFD != -1) {
+#ifdef ROIDSERVER_LOGGING
+	  if (!network_matchAddr(global.ignoreList.entries[i].addr, global.clients[i].addr.sin_addr.s_addr, global.ignoreList.entries[i].mask)) {	  
+	      log_printf("removing connection slot: %d\n", i);
+	    }
+#endif
 	  network_closeSocket(global.clients[i].socketFD);
 	  global.clients[i].id = 0;
 	  global.clients[i].socketFD = -1;
@@ -410,7 +424,11 @@ network_removeConnection(int index)
       }
     }
   } else if (global.clients[index].socketFD != -1) {
-    log_printf("removing connection slot: %d\n", index);
+#ifdef ROIDSERVER_LOGGING    
+    if (!network_matchAddr(global.ignoreList.entries[index].addr, global.clients[index].addr.sin_addr.s_addr, global.ignoreList.entries[index].mask)) {    
+      log_printf("removing connection slot: %d\n", index);
+    }
+#endif
     network_closeSocket(global.clients[index].socketFD);
     global.clients[index].socketFD = -1;    
   } else {
@@ -447,13 +465,6 @@ main_loadPort(void)
 #endif
 
 #ifndef ROIDSERVER_NO_ALLOW_DENY_LISTS
-
-static int
-network_matchAddr(uint32_t addr1, uint32_t addr2, uint32_t mask) {
-  addr1 = htonl(addr1);
-  addr2 = htonl(addr2);
-  return (addr1 & mask) == (addr2 & mask);
-}
 
 static void
 main_addToAllowDenyList(allowdeny_list_t* list, uint32_t addr, uint32_t mask)
@@ -516,10 +527,19 @@ main_loadAllowDenyList(allowdeny_list_t* list, const char* filename)
 static void
 main_loadDenyList(void)
 {
-  main_loadAllowDenyList(&global.denyList, ROIDSERVER_DENT_LIST_FILENAME);
+  main_loadAllowDenyList(&global.denyList, ROIDSERVER_DENY_LIST_FILENAME);
 }
 
 #endif
+
+#ifdef ROIDSERVER_LOGGING
+static void
+main_loadIgnoreList(void)
+{
+  main_loadAllowDenyList(&global.ignoreList, ROIDSERVER_IGNORE_LIST_FILENAME);
+}
+#endif
+
 
 static char*
 network_ntoa(uint32_t addr)
@@ -633,7 +653,7 @@ static void
 main_appendToDenyFile(unsigned int i)
 {
   network_assertValidClient(i);
-  FILE* fp = fopen(ROIDSERVER_DENT_LIST_FILENAME, "a");
+  FILE* fp = fopen(ROIDSERVER_DENY_LIST_FILENAME, "a");
   int ok = 0;
 
   if (fp) {
@@ -643,12 +663,12 @@ main_appendToDenyFile(unsigned int i)
     ok = fwrite(addr, strlen(addr), 1, fp) == 1 && fwrite("\n", strlen("\n"), 1, fp) == 1;
 
     if (!ok) {
-      log_printf("WARNING: failed to append %s to deny list ["ROIDSERVER_DENT_LIST_FILENAME"]\n", addr);
+      log_printf("WARNING: failed to append %s to deny list ["ROIDSERVER_DENY_LIST_FILENAME"]\n", addr);
     }
 
     fclose(fp);
   } else {
-    log_printf("WARNING: failed to open deny list ["ROIDSERVER_DENT_LIST_FILENAME"]\n");
+    log_printf("WARNING: failed to open deny list ["ROIDSERVER_DENY_LIST_FILENAME"]\n");
   }
 }
 
@@ -695,7 +715,9 @@ dashboard_renderReloadHTML(unsigned int dashboardIndex)
   }
 
   main_loadDenyList();
-
+#ifdef ROIDSERVER_LOGGING
+  main_loadIgnoreList();  
+#endif
   unsigned int i;
   for (i = 0; i < countof(global.dashboard); i++) {
     dashboard_removeConnection(i);
@@ -1304,7 +1326,12 @@ network_processClientData(fd_set *read_fds)
 	  }
 	} else {
 	  if (len == 0) {
-	    log_printf("failed: %s\n", log_getError());
+#ifdef ROIDSERVER_LOGGING	    
+	    if (!network_matchAddr(global.ignoreList.entries[i].addr, global.clients[i].addr.sin_addr.s_addr, global.ignoreList.entries[i].mask)) {
+	      
+	      log_printf("failed: %s\n", log_getError());
+	    }
+#endif
 	    network_removeConnection(i);
 	  }
 	  done = 1;
@@ -1386,7 +1413,11 @@ network_addConnection(int socketFD)
       time(&global.clients[i].connected);
       strlcpy(global.clients[i].ip, network_ntoa(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
 #endif
-      log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
+#ifdef ROIDSERVER_LOGGING
+      if (!network_matchAddr(global.ignoreList.entries[i].addr, addr.sin_addr.s_addr, global.ignoreList.entries[i].mask)) {
+	log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
+      }
+#endif
       return;
     }
   }
