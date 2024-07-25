@@ -1200,7 +1200,7 @@ network_setId(unsigned int index, uint32_t id)
   unsigned int i;
   int count = 0;
   for (i = 0; i < countof(global.clients); i++) {
-    if (global.clients[i].id == id) {
+    if ((global.clients[i].id&0x0FFFFFFF) == (id&0x0FFFFFFF)) {
       count++;
     }
   }
