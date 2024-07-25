@@ -41,6 +41,7 @@
 #define ROIDSERVER_MAX_DASHBOARD_CLIENTS  8
 #define ROIDSERVER_LOGGING
 #define ROIDSERVER_CONFIGURABLE_PORT
+#define ROIDSERVER_CLEANUP_BUSY 
 #endif
 
 #define ROIDSERVER_NUM_PING_PACKETS       8
@@ -1376,14 +1377,19 @@ network_setupFDS(fd_set *read_fds)
   }
 #endif
 
+#ifdef ROIDSERVER_CLEANUP_BUSY
   time_t now;
   time(&now);
+#endif
   
   unsigned int i;
   for (i = 0; i < countof(global.clients); i++) {
+#ifdef ROIDSERVER_CLEANUP_BUSY
     if (global.clients[i].socketFD != -1 && global.clients[i].id == 0xFFFFFFFF && (now - global.clients[i].connected > 5)) {
       network_removeConnection(i);
-    } else  if (global.clients[i].id) {
+    } else
+#endif
+      if (global.clients[i].id) {
       if (global.clients[i].socketFD > maxFD) {
 	maxFD = global.clients[i].socketFD;
       }
@@ -1434,8 +1440,10 @@ network_addConnection(int socketFD)
       global.clients[i].addr = addr;
 #if defined(ROIDSERVER_DASHBOARD) || defined(ROIDSERVER_CLEANUP_BUSY)
       time(&global.clients[i].connected);
-#endif
+#if defined(ROIDSERVER_DASHBOARD)
       strlcpy(global.clients[i].ip, network_ntoa(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
+#endif
+#endif            
 #ifdef ROIDSERVER_LOGGING
       if (!network_isIgnoredAddr(global.clients[i].addr.sin_addr.s_addr)) {	  
 	log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
