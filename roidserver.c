@@ -623,7 +623,7 @@ http_matchRequest(unsigned int dashboardIndex, const char *request, int requestL
   const char terminator = '\n';
 
   if ((n = *request++) != terminator && n != '\0') {
-    int len = strnlen(request, requestLen);
+    int len = strnlen(request, requestLen-1);
     do {
       do {
 	if ((h = *haystack++) == terminator || n == '\0' || haystackLen-- < 1)
@@ -965,14 +965,14 @@ http_processRequest(int i)
       found = http_sendFile(i, "roid.ico", "image/vnd.microsoft.icon", ROIDSERVER_CACHE_TIMEOUT_SECONDS);
     } else if (http_matchPath(i, "reset") != NULL) {
       found = http_send(i, dashboard_renderResetHTML, "text/html", 0, i);
-    } else if (http_matchPath(i, "dashboard") != NULL) {
-      found = http_sendFile(i, "roid.html", "text/html", ROIDSERVER_CACHE_TIMEOUT_SECONDS);
     } else if (http_matchPath(i, "disconnect") != NULL) {
       found = http_send(i, dashboard_renderDisconnectHTML, "text/html", 0, i);
     } else if (http_matchPath(i, "ban") != NULL) {
       found = http_send(i, dashboard_renderBanHTML, "text/html", 0, i);
     } else if (http_matchPath(i, "exit") != NULL) {
       network_exit(0);
+    } else if (http_matchPath(i, "dashboard") != NULL) {
+      found = http_sendFile(i, "roid.html", "text/html", ROIDSERVER_CACHE_TIMEOUT_SECONDS);
     }
   }
 
@@ -982,7 +982,7 @@ http_processRequest(int i)
       found = http_sendFile(i, "Sans.ttf", "font/ttf", ROIDSERVER_CACHE_TIMEOUT_SECONDS);
     }
     if (!found) {
-      http_sendFile(i, "404.html", "text/html", ROIDSERVER_CACHE_TIMEOUT_SECONDS);
+      found = http_sendFile(i, "roid.html", "text/html", ROIDSERVER_CACHE_TIMEOUT_SECONDS);            
     }
   }
 }

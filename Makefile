@@ -15,10 +15,10 @@ WARNINGS=-Wall
 endif
 endif
 
-DEBUG_CFLAGS= #-g $(STATIC_ANALYZE)
+DEBUG_CFLAGS=$(STATIC_ANALYZE)
 OBJS=$(addprefix build/obj/, $(SRCS:.c=.o))
 CFLAGS=-O2 $(WARNINGS) $(DEBUG_CFLAGS)
-LDFLAGS=-s
+LDFLAGS=
 
 WIN32_OBJS=$(addprefix build/win32/, $(SRCS:.c=.o))
 WIN32_CC=i686-w64-mingw32-gcc
@@ -61,3 +61,15 @@ build/win32/roid.exe: $(WIN32_OBJS)
 
 clean:
 	rm -rf build
+
+release: all
+	rm -rf roidserver
+	rm -f roiserver.zip
+	mkdir roidserver
+	cp build/amiga/roid.d roidserver/roid.d
+	cp roid.html roidserver
+	cp roid.css roidserver
+	cp Sans.ttf roidserver
+	cp roid.ico roidserver
+	zip -r roidserver.zip roidserver
+	rm -rf roidserver
