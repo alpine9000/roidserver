@@ -152,9 +152,14 @@ typedef struct {
   struct sockaddr_in addr;
   uint32_t lag;
   uint32_t networkPlayer;
+
+#if defined(ROIDSERVER_DASHBOARD) || defined(ROIDSERVER_CLEANUP_BUSY)
+  time_t connected;
+#endif
+  
 #ifdef ROIDSERVER_DASHBOARD
   char ip[20];      
-  time_t connected;
+
   int sent;
   int recv;
 #endif
@@ -1203,6 +1208,9 @@ network_setId(unsigned int index, uint32_t id)
     global.clients[index].networkPlayer = count;
     global.clients[index].id = id;
     log_printf("assigning %d to %x\n", index, id);
+  } else {
+    global.clients[index].id = 0xFFFFFFFF;
+    global.clients[index].networkPlayer = 0xFFFFFFFF;    
   }
 
   return count < 2;
@@ -1254,9 +1262,6 @@ network_processId(int index)
   global.clients[index].state++;
   if (!network_setId(index, packet)) {
     log_printf("failed (id already in use)\n");
-    uint32_t busy = 0xFFFFFFFF;
-    network_send(index, &busy, sizeof(busy));
-    network_removeConnection(index);
   }
 }
 
@@ -1371,9 +1376,14 @@ network_setupFDS(fd_set *read_fds)
   }
 #endif
 
+  time_t now;
+  time(&now);
+  
   unsigned int i;
   for (i = 0; i < countof(global.clients); i++) {
-    if (global.clients[i].id) {
+    if (global.clients[i].socketFD != -1 && global.clients[i].id == 0xFFFFFFFF && (now - global.clients[i].connected > 5)) {
+      network_removeConnection(i);
+    } else  if (global.clients[i].id) {
       if (global.clients[i].socketFD > maxFD) {
 	maxFD = global.clients[i].socketFD;
       }
@@ -1422,10 +1432,10 @@ network_addConnection(int socketFD)
       global.clients[i].id = 1;
       global.clients[i].socketFD = socketFD;
       global.clients[i].addr = addr;
-#ifdef ROIDSERVER_DASHBOARD
+#if defined(ROIDSERVER_DASHBOARD) || defined(ROIDSERVER_CLEANUP_BUSY)
       time(&global.clients[i].connected);
-      strlcpy(global.clients[i].ip, network_ntoa(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
 #endif
+      strlcpy(global.clients[i].ip, network_ntoa(global.clients[i].addr.sin_addr.s_addr), sizeof(global.clients[i].ip));
 #ifdef ROIDSERVER_LOGGING
       if (!network_isIgnoredAddr(global.clients[i].addr.sin_addr.s_addr)) {	  
 	log_printf("%s: new client slot: %d fd: %d\n", global.clients[i].ip, i, socketFD);
@@ -1516,7 +1526,6 @@ main(int argc, char** argv)
 #else
     int task = select(maxFD + 1, &read_fds, NULL, NULL, NULL);
 #endif
-
 
     switch (task) {
     case -1:
