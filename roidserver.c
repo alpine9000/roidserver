@@ -1228,19 +1228,6 @@ network_getPacket(int index)
 }
 
 
-static void
-network_processId(int index)
-{
-  network_assertValidClient(index);
-  uint32_t packet = network_getPacket(index);
-  global.clients[index].state++;
-  if (!network_setId(index, packet)) {
-    log_printf("failed (id already in use)\n");
-    network_removeConnection(index);
-  }
-}
-
-
 static int
 network_send(int clientIndex, void* data, int len)
 {
@@ -1257,6 +1244,20 @@ network_send(int clientIndex, void* data, int len)
   }
 
   return 0;
+}
+
+static void
+network_processId(int index)
+{
+  network_assertValidClient(index);
+  uint32_t packet = network_getPacket(index);
+  global.clients[index].state++;
+  if (!network_setId(index, packet)) {
+    log_printf("failed (id already in use)\n");
+    uint32_t busy = 0xFFFFFFFF;
+    network_send(index, &busy, sizeof(busy));
+    network_removeConnection(index);
+  }
 }
 
 
