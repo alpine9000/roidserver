@@ -7,7 +7,7 @@ This is the server component for [Metro Siege](https://metrosiege.com) online co
 
 Configuration
 -------------
-_roidserver_ is configured by editing the [roidserver.c](roidserver.c) and modifying the configuration _hash defines).
+_roidserver_ is configured by editing [roidserver.c](roidserver.c) and modifying the configuration _hash defines_).
 
 ### ROIDSERVER_DASHBOARD
 Enable the web based dashboard (default: enabled, amiga: disabled)
