@@ -7,7 +7,7 @@ This is the server component for Metro Siege online co-op. Clients connect to th
 
 Configuration
 -------------
-_roidserver_ is configured by editing the [a roidserver.c](roidserver.c) and modifying the configuration _hash defines).
+_roidserver_ is configured by editing the [roidserver.c](roidserver.c) and modifying the configuration _hash defines).
 
 ### ROIDSERVER_DASHBOARD
 Enable the web based dashboard (default: enabled, amiga: disabled)
@@ -44,7 +44,7 @@ A group of optional configuration files can be used to configure _roidserver_.
 ### allow.txt
 List of ip addresses/netmasks that are allowed to connect to the dashboard html server.
 
-Format: <IP/Netmask
+Format: <IP/Netmask>
 Example: 124.233.121.112/255.255.255.255
 
 Note: netmask is optional
@@ -52,7 +52,7 @@ Note: netmask is optional
 ### deny.txt
 List of ip addresses/netmasks that are not allowed to connect to the _roidserver_.
 
-Format: <IP/Netmask
+Format: <IP/Netmask>
 Example: 124.233.121.112/255.255.255.255
 
 Note: netmask is optional
@@ -60,7 +60,7 @@ Note: netmask is optional
 ### ignore.txt
 List of ip addresses/netmasks in which connection information will not be logged. (Useful for health checks)
 
-Format: <IP/Netmask
+Format: <IP/Netmask>
 Example: 124.233.121.112/255.255.255.255
 
 Note: netmask is optional
@@ -68,22 +68,16 @@ Note: netmask is optional
 ### root.txt
 Name of the root url path used for the dashboard html server (Useful if the dashboard is behind a proxy server)
 
-Example "dashboard/url"
+Example: dashboard/url
 
 https://example.com/dashboard/url
 
 ### ports.txt
 Set the listen ports for both the game server port (default: 9000) and dashboard port (default: 9001)
 
-Format:
+Format: <game server port> <dashboard port>
 
-<game server port>
-<dashboard port>
-
-Example:
-
-9002
-9003
+Example: 9002 9003
 
 Code Security
 -------------
@@ -91,4 +85,8 @@ This program is written in C, therefore it is highly recommended that additional
 
 Amiga
 -----
-By default the Amiga version of _roidserver_ will be configured with minimal options. This configuration is designed to be run on home networks with low power Amiga computers. The ram overhead of running _roidserver_ on an Amiga is less than 4kb. If you have a higher powered Amiga and wish to enable additional features, edit [a roidserver.c](roidserver.com).
+By default the Amiga version of _roidserver_ will be configured with minimal options. This configuration is designed to be run on home networks with low power Amiga computers. The ram overhead of running _roidserver_ on an Amiga is less than 4kb. If you have a higher powered Amiga and wish to enable additional features, edit [roidserver.c](roidserver.com).
+
+Logging
+-------
+If configured, _roidserver_ will log operational details and connections to stdout. If configured as daemon we recommend redirecting this output to a log file
