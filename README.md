@@ -5,9 +5,9 @@ About
 -----
 _roidserver_ is the server component for [Metro Siege](https://metrosiege.com) online co-op. Clients connect to the server, are matched by a supplied GAME ID, then will be able to play cooperatively. The server facilitates communication between each pair of clients.
 
-Configuration
--------------
-_roidserver_ is configured by editing [roidserver.c](roidserver.c) and modifying the configuration _hash defines_. Comment the item to change configuration from default.
+Functional Configuration
+------------------------
+Different _roidserver_ functionality can be enabled/disabled at compile time by editing [roidserver.c](roidserver.c) and modifying the configuration _hash defines_. Comment the item to change configuration from default.
 
 ### ROIDSERVER_DASHBOARD
 Enable the web based dashboard (default: enabled, amiga: disabled)
