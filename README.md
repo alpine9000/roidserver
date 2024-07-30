@@ -1,3 +1,94 @@
-# roidserver
+Network game server for Metro Siege
+===================================
 
-Simple network game server for Metro Siege
+About
+-----
+This is the server component for Metro Siege online co-op. Clients connect to the server, are matched by a supplied GAME ID, then will be able to play co-operatively. The server facilitates communication between each pair of clients.
+
+Configuration
+-------------
+_roidserver_ is configured by editing the [a roidserver.c](roidserver.c) and modifying the configuration _hash defines).
+
+### ROIDSERVER_DASHBOARD
+Enable the web based dashboard (default: enabled, amiga: disabled)
+
+### ROIDSERVER_LOGGING
+Enable logging of operational events (default: enabled, amiga: disabled)
+
+### ROIDSERVER_MAX_CLIENTS
+Set the maximum number of clients allowed to connect (default: 256, amiga: 2)
+
+### ROIDSERVER_NO_ALLOW_DENY_LISTS 
+Disable allow/deny list functionality (default: lists allowed, amiga: lists disabled)
+
+Supported Targets
+-----------------
+_roidserver_ has been built and tested on AmigaOS, OSX, Linux and Windows
+
+Building
+--------
+A very simple Makefile is included, however this may require editing or replacement depending on your compiler and environment. _roidserver_ is a single C file, so compliation in other environments should be quite simple.
+
+Running
+-------
+_roidserver_ allows connections from untrusted clients over the internet. For this reason every precaution must be taken when deploying and running this server. The web based dashboard is not secure and must be run behind a proxy server that can provide the required level of security.
+
+Dashboard
+---------
+The web based dashboard shows a summary of the client connection statistics as well as connection details for each connected client. The dashboard provides some server based controls (Reset - disconnect all clients, Reload - reload configuration, Shutdown - terminate the server) and client based controls (Disconnect - disconnect the client, Ban - add the client to the deny.txt file). By default the dashboard will bind the 127.0.0.1. We do not recommend running the dashboard in a way that allows unretricted access to the broarder internet).
+
+Configuration Files
+-------------------
+A group of optional configuration files can be used to configure _roidserver_.
+
+### allow.txt
+List of ip addresses/netmasks that are allowed to connect to the dashboard html server.
+
+Format: <IP/Netmask
+Example: 124.233.121.112/255.255.255.255
+
+Note: netmask is optional
+
+### deny.txt
+List of ip addresses/netmasks that are not allowed to connect to the _roidserver_.
+
+Format: <IP/Netmask
+Example: 124.233.121.112/255.255.255.255
+
+Note: netmask is optional
+
+### ignore.txt
+List of ip addresses/netmasks in which connection information will not be logged. (Useful for health checks)
+
+Format: <IP/Netmask
+Example: 124.233.121.112/255.255.255.255
+
+Note: netmask is optional
+
+### root.txt
+Name of the root url path used for the dashboard html server (Useful if the dashboard is behind a proxy server)
+
+Example "dashboard/url"
+
+https://example.com/dashboard/url
+
+### ports.txt
+Set the listen ports for both the game server port (default: 9000) and dashboard port (default: 9001)
+
+Format:
+
+<game server port>
+<dashboard port>
+
+Example:
+
+9002
+9003
+
+Code Security
+-------------
+This program is written in C, therefore it is highly recommended that additional measures be put in place to ensure that defects in the code do not lead to compromise of the hosting environment. _roidserver_ is high performance software, we recommend enabling any available sanitizer that your C compiler provides to minimise the risk that memory defects translate to code execution vulnerabilities.
+
+Amiga
+-----
+By default the Amiga version of _roidserver_ will be configured with minimal options. This configuration is designed to be run on home networks with low power Amiga computers. The ram overhead of running _roidserver_ on an Amiga is less than 4kb. If you have a higher powered Amiga and wish to enable additional features, edit [a roidserver.c](roidserver.com).
