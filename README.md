@@ -1,9 +1,9 @@
-Network game server for Metro Siege
+Network Game Server for Metro Siege
 ===================================
 
 About
 -----
-This is the server component for Metro Siege online co-op. Clients connect to the server, are matched by a supplied GAME ID, then will be able to play co-operatively. The server facilitates communication between each pair of clients.
+This is the server component for [Metro Siege](https://metrosiege.com) online co-op. Clients connect to the server, are matched by a supplied GAME ID, then will be able to play co-operatively. The server facilitates communication between each pair of clients.
 
 Configuration
 -------------
@@ -27,7 +27,7 @@ _roidserver_ has been built and tested on AmigaOS, OSX, Linux and Windows.
 
 Building
 --------
-A very simple Makefile is included, however this may require editing or replacement depending on your compiler and environment. _roidserver_ is a single C file, so compilation in other environments should be quite simple. To build roidserver for an Amiga use [Bebbo's Amiga GCC](https://github.com/bebbo/amiga-gcc])
+A very simple Makefile is included, however this may require editing or replacement depending on your compiler and environment. _roidserver_ is a single C file, so compilation in other environments should be quite simple. To build roidserver for an Amiga use [Bebbo's Amiga GCC](https://github.com/bebbo/amiga-gcc]).
 
 Running
 -------
