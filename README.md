@@ -23,7 +23,7 @@ Disable allow/deny list functionality (default: lists allowed, amiga: lists disa
 
 Supported Targets
 -----------------
-_roidserver_ has been built and tested on AmigaOS, OSX, Linux and Windows.
+_roidserver_ has been built and tested on AmigaOS, OS/X, Linux and Windows.
 
 Building
 --------
