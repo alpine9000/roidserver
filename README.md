@@ -23,15 +23,15 @@ Disable allow/deny list functionality (default: lists allowed, amiga: lists disa
 
 Supported Targets
 -----------------
-_roidserver_ has been built and tested on AmigaOS, OSX, Linux and Windows
+_roidserver_ has been built and tested on AmigaOS, OSX, Linux and Windows.
 
 Building
 --------
-A very simple Makefile is included, however this may require editing or replacement depending on your compiler and environment. _roidserver_ is a single C file, so compliation in other environments should be quite simple.
+A very simple Makefile is included, however this may require editing or replacement depending on your compiler and environment. _roidserver_ is a single C file, so compilation in other environments should be quite simple. To build roidserver for an Amiga use (https://github.com/bebbo/amiga-gcc)[Bebbo's Amiga GCC]
 
 Running
 -------
-_roidserver_ allows connections from untrusted clients over the internet. For this reason every precaution must be taken when deploying and running this server. The web based dashboard is not secure and must be run behind a proxy server that can provide the required level of security.
+_roidserver_ allows connections from untrusted clients over the internet. For this reason every precaution must be taken when deploying and running this server. The web based dashboard is not secure and must be run behind a proxy server that can provide the required level of security. _roidserver_ will by default bind to port 0.0.0.0:9000 for the game connections and 127.0.0.1:9001 for the web based dashboard. _roidserver_ will only allocate memory for the dashboard functionality. If the dashboard is disabled, no additional memory will be allocated during operation.
 
 Dashboard
 ---------
@@ -81,7 +81,7 @@ Example: 9002 9003
 
 Code Security
 -------------
-This program is written in C, therefore it is highly recommended that additional measures be put in place to ensure that defects in the code do not lead to compromise of the hosting environment. _roidserver_ is high performance software, we recommend enabling any available sanitizer that your C compiler provides to minimise the risk that memory defects translate to code execution vulnerabilities.
+This program is written in C, therefore it is highly recommended that additional measures be put in place to ensure that defects in the code do not lead to compromise of the hosting environment. _roidserver_ is quite simple software and does not require high levels of compiler optimisations to be performant, therefore we recommend enabling any available sanitizer that your C compiler provides to minimise the risk that memory defects translate to code execution vulnerabilities. For example: -fsanitize=address -fsanitize=undefined.
 
 Amiga
 -----
