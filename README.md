@@ -27,7 +27,7 @@ _roidserver_ has been built and tested on AmigaOS, OSX, Linux and Windows.
 
 Building
 --------
-A very simple Makefile is included, however this may require editing or replacement depending on your compiler and environment. _roidserver_ is a single C file, so compilation in other environments should be quite simple. To build roidserver for an Amiga use (https://github.com/bebbo/amiga-gcc)[Bebbo's Amiga GCC]
+A very simple Makefile is included, however this may require editing or replacement depending on your compiler and environment. _roidserver_ is a single C file, so compilation in other environments should be quite simple. To build roidserver for an Amiga use [https://github.com/bebbo/amiga-gcc](Bebbo's Amiga GCC)
 
 Running
 -------
@@ -85,7 +85,7 @@ This program is written in C, therefore it is highly recommended that additional
 
 Amiga
 -----
-By default the Amiga version of _roidserver_ will be configured with minimal options. This configuration is designed to be run on home networks with low power Amiga computers. The ram overhead of running _roidserver_ on an Amiga is less than 4kb. If you have a higher powered Amiga and wish to enable additional features, edit [roidserver.c](roidserver.com).
+By default the Amiga version of _roidserver_ will be configured with minimal options. This configuration is designed to be run on home networks with low power Amiga computers. The ram overhead of running _roidserver_ on an Amiga is less than 4kb. If you have a higher powered Amiga and wish to enable additional features, edit [roidserver.c](roidserver.c).
 
 Logging
 -------
