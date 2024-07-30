@@ -3,7 +3,7 @@ Network Game Server for Metro Siege
 
 About
 -----
-_roidserver_ is the server component for [Metro Siege](https://metrosiege.com) online co-op. Clients connect to the server, are matched by a supplied GAME ID, then will be able to play co-operatively. The server facilitates communication between each pair of clients.
+_roidserver_ is the server component for [Metro Siege](https://metrosiege.com) online co-op. Clients connect to the server, are matched by a supplied GAME ID, then will be able to play cooperatively. The server facilitates communication between each pair of clients.
 
 Configuration
 -------------
