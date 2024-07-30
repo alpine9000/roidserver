@@ -31,7 +31,7 @@ A very simple Makefile is included, however this may require editing or replacem
 ```
 cc roidserver.c -o roidserver
 ```
-To build roidserver for an Amiga use [Bebbo's Amiga GCC](https://github.com/bebbo/amiga-gcc]) and the supplied Makefile (editing for installation paths will be required).
+To build roidserver for an Amiga use [Bebbo's Amiga GCC](https://github.com/bebbo/amiga-gcc) and the supplied Makefile (editing for installation paths will be required).
 
 Running
 -------
