@@ -27,7 +27,7 @@ _roidserver_ has been built and tested on AmigaOS, OSX, Linux and Windows.
 
 Building
 --------
-A very simple Makefile is included, however this may require editing or replacement depending on your compiler and environment. _roidserver_ is a single C file, so compilation in other environments should be quite simple. To build roidserver for an Amiga use [https://github.com/bebbo/amiga-gcc](Bebbo's Amiga GCC)
+A very simple Makefile is included, however this may require editing or replacement depending on your compiler and environment. _roidserver_ is a single C file, so compilation in other environments should be quite simple. To build roidserver for an Amiga use [https://github.com/bebbo/amiga-gcc](Bebboxs Amiga GCC)
 
 Running
 -------
