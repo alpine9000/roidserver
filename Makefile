@@ -6,11 +6,11 @@ ifeq ($(OS),Windows_NT)
 else
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-STATIC_ANALYZE=-fsanitize=address -fsanitize=undefined
+STATIC_ANALYZE=-fsanitize=address -fsanitize=undefined -fstack-protector-all 
 WARNINGS=-Wno-error=format -Wno-format -Wall -Werror -Wall -Wpedantic -Wno-unknown-attributes -Wno-ignored-optimization-argument -Wno-unknown-pragmas  -Wmissing-field-initializers -Wfatal-errors -Wextra -Wshadow -Wuninitialized  -Wundef -Wbad-function-cast -Wparentheses -Wnull-dereference -pedantic-errors
 else
 CC=gcc
-STATIC_ANALYZE= -fsanitize=address -fsanitize=undefined #-fanalyzer -fsanitize=leak 
+STATIC_ANALYZE= -fsanitize=address -fsanitize=undefined -fstack-protector-all
 WARNINGS=-Wall
 endif
 endif
@@ -22,7 +22,7 @@ LDFLAGS=
 
 WIN32_OBJS=$(addprefix build/win32/, $(SRCS:.c=.o))
 WIN32_CC=i686-w64-mingw32-gcc
-WIN32_CFLAGS=-O2 $(WARNINGS)
+WIN32_CFLAGS=-O2 $(WARNINGS) 
 WIN32_LIBS=-lws2_32
 
 AMIGA_OBJS=$(addprefix build/amiga/, $(SRCS:.c=.o))

@@ -85,7 +85,7 @@ Example: 9002 9003
 
 Code Security
 -------------
-This program is written in C, therefore it is highly recommended that additional measures be put in place to ensure that defects in the code do not lead to compromise of the hosting environment. _roidserver_ is quite simple software and does not require high levels of compiler optimisations to be performant, therefore we recommend enabling any available sanitizer that your C compiler provides to minimise the risk that memory defects translate to code execution vulnerabilities. For example: -fsanitize=address -fsanitize=undefined.
+This program is written in C, therefore it is highly recommended that additional measures be put in place to ensure that defects in the code do not lead to compromise of the hosting environment. _roidserver_ is quite simple software and does not require high levels of compiler optimisations to be performant, therefore we recommend enabling any available sanitizer or stack protection options that your C compiler provides to minimise the risk that memory defects translate to code execution vulnerabilities. For example: -fsanitize=address -fsanitize=undefined -fstack-protector-all.
 
 Amiga
 -----
