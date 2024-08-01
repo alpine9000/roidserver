@@ -91,6 +91,8 @@ Amiga
 -----
 By default the Amiga version of _roidserver_ will be configured with minimal options. This configuration is designed to be run on home networks with low power Amiga computers. The ram overhead of running _roidserver_ on an Amiga is around 10kb. If you have a higher powered Amiga and wish to enable additional features, edit [roidserver.c](roidserver.c).
 
+A pre-built Amiga version is available for [download](https://metrosiege.com/download/roidserver-d3c5.lha)
+
 Logging
 -------
 If configured, _roidserver_ will log operational details and connections to stdout. If configured as daemon we recommend redirecting this output to a log file
