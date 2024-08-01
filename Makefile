@@ -64,12 +64,8 @@ clean:
 
 release: all
 	rm -rf roidserver
-	rm -f roiserver.zip
+	rm -f roiserver.lha
 	mkdir roidserver
 	cp build/amiga/roid.d roidserver/roid.d
-	cp roid.html roidserver
-	cp roid.css roidserver
-	cp Sans.ttf roidserver
-	cp roid.ico roidserver
 	lha a roidserver.lha roidserver
 	rm -rf roidserver
