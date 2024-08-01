@@ -33,7 +33,7 @@
 #endif
 
 #ifdef AMIGA
-#define ROIDSERVER_MAX_CLIENTS            2
+#define ROIDSERVER_MAX_CLIENTS            8
 #define ROIDSERVER_NO_ALLOW_DENY_LISTS
 #else
 #define ROIDSERVER_DASHBOARD
