@@ -71,5 +71,5 @@ release: all
 	cp roid.css roidserver
 	cp Sans.ttf roidserver
 	cp roid.ico roidserver
-	zip -r roidserver.zip roidserver
+	lha a roidserver.lha roidserver
 	rm -rf roidserver
