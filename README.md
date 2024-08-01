@@ -16,7 +16,7 @@ Enable the web based dashboard (default: enabled, amiga: disabled)
 Enable logging of operational events (default: enabled, amiga: disabled)
 
 ### ROIDSERVER_MAX_CLIENTS
-Set the maximum number of clients allowed to connect (default: 256, amiga: 2)
+Set the maximum number of clients allowed to connect (default: 256, amiga: 8)
 
 ### ROIDSERVER_NO_ALLOW_DENY_LISTS 
 Disable allow/deny list functionality (default: lists allowed, amiga: lists disabled)
@@ -89,7 +89,7 @@ This program is written in C, therefore it is highly recommended that additional
 
 Amiga
 -----
-By default the Amiga version of _roidserver_ will be configured with minimal options. This configuration is designed to be run on home networks with low power Amiga computers. The ram overhead of running _roidserver_ on an Amiga is less than 4kb. If you have a higher powered Amiga and wish to enable additional features, edit [roidserver.c](roidserver.c).
+By default the Amiga version of _roidserver_ will be configured with minimal options. This configuration is designed to be run on home networks with low power Amiga computers. The ram overhead of running _roidserver_ on an Amiga is around 10kb. If you have a higher powered Amiga and wish to enable additional features, edit [roidserver.c](roidserver.c).
 
 Logging
 -------
